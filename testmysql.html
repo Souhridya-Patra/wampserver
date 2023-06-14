@@ -1,0 +1,28 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title></title>
+</head>
+<body>
+&lt;?php<br/>
+/*<br/>
+* Change the value of $password if you have set a password on the root userid<br/>
+* Change NULL to port number to use DBMS other than the default using port 3306<br/>
+*<br/>
+*/<br/>
+$user = &#39;root&#39;;<br/>
+$password = &#39;&#39;; //To be completed if you have set a password to root<br/>
+$database = &#39;&#39;; //To be completed to connect to a database. The database must exist.<br/>
+$port = NULL; //Default must be NULL to use default port<br/>
+$mysqli = new mysqli(&#39;127.0.0.1&#39;, $user, $password, $database, $port);<br/>
+<br/>
+if ($mysqli&ndash;&gt;connect_error) {<br/>
+    die(&#39;Connect Error (&#39; . $mysqli&ndash;&gt;connect_errno . &#39;) &#39;<br/>
+            . $mysqli&ndash;&gt;connect_error);<br/>
+}<br/>
+echo &#39;&lt;p&gt;Connection OK &#39;. $mysqli&ndash;&gt;host_info.&#39;&lt;/p&gt;&#39;;<br/>
+echo &#39;&lt;p&gt;Server &#39;.$mysqli&ndash;&gt;server_info.&#39;&lt;/p&gt;&#39;;<br/>
+echo &#39;&lt;p&gt;Initial charset: &#39;.$mysqli&ndash;&gt;character_set_name().&#39;&lt;/p&gt;&#39;;<br/>
+<br/>
+$mysqli&ndash;&gt;close();<br/>
+?&gt;</body></html>

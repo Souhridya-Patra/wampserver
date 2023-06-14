@@ -1,0 +1,1243 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title></title>
+</head>
+<body>
+&lt;?php<br/>
+// 3.3.0 &ndash; Fix problem with alias FCGI mode with FcgidInitialEnv<br/>
+//          Replace ${var} by {$var}<br/>
+<br/>
+$server_dir = &quot;../&quot;;<br/>
+session_start();<br/>
+<br/>
+require $server_dir.&#39;scripts/config.inc.php&#39;;<br/>
+require $server_dir.&#39;scripts/wampserver.lib.php&#39;;<br/>
+$c_PortToUse = $c_UsedPort;<br/>
+<br/>
+$styleOpaNoClickMod = $styleNoDisplay = $serialModify = &#39;&#39;;<br/>
+$VhostToMod = $AliasToMod = array();<br/>
+$VhostToModify = $AliasToModify = false;<br/>
+<br/>
+//** Based on an idea by Panagiotis E. Papazoglou<br/>
+//General scrolling (on or off) is controlled by Wampserver parameter &#39;ScrollListsHomePage&#39;<br/>
+// via Right&ndash;Click &ndash;&gt; Wamp Settings &ndash;&gt; Allow scrolling of lists on home page<br/>
+//To allow or not the individual scrolling of the lists Alias and VirtualHost<br/>
+//   &#39;scroll&#39; true or false to do the scroll or not<br/>
+//   &#39;lines&#39;  minimum number of lines to do the scroll<br/>
+// Do not change anything other than the values assigned to &#39;scroll&#39; and &#39;lines&#39;<br/>
+$Scroll_List = array(<br/>
+&nbsp;&nbsp;&nbsp;&#39;alias&#39;    =&gt; array(&#39;scroll&#39; =&gt; true,&#39;lines&#39; =&gt; 15,&#39;name&#39; =&gt; &#39;AliasListScroller&#39;,   &#39;nbname&#39; =&gt; &#39;nbAliasLines&#39;),<br/>
+&nbsp;&nbsp;&nbsp;&#39;vhosts&#39;   =&gt; array(&#39;scroll&#39; =&gt; true,&#39;lines&#39; =&gt; 15,&#39;name&#39; =&gt; &#39;VhostsListScroller&#39;,  &#39;nbname&#39; =&gt; &#39;nbVhostLines&#39;),<br/>
+);<br/>
+foreach($Scroll_List as $key =&gt; $value) {<br/>
+&nbsp;&nbsp;&nbsp;${$value[&#39;name&#39;]} = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;${$value[&#39;nbname&#39;]} = 0;<br/>
+}<br/>
+<br/>
+//***** Language *****<br/>
+$langue = $wampConf[&#39;language&#39;];<br/>
+$i_langues = glob(&#39;wamplangues/add_vhost_*.php&#39;);<br/>
+$languages = array();<br/>
+foreach ($i_langues as $value) {<br/>
+  $languages[] = str_replace(array(&#39;wamplangues/add_vhost_&#39;,&#39;.php&#39;), &#39;&#39;, $value);<br/>
+}<br/>
+$langueget = (!empty($_GET[&#39;lang&#39;]) ? strip_tags(trim($_GET[&#39;lang&#39;])) : &#39;&#39;);<br/>
+if(in_array($langueget,$languages))<br/>
+&nbsp;&nbsp;&nbsp;$langue = $langueget;<br/>
+// Search for the different languages available<br/>
+$langueswitcher = &#39;&lt;form method=&quot;get&quot; style=&quot;display:inline&ndash;block;margin&ndash;left:10px;&quot;&gt;&lt;select name=&quot;lang&quot; id=&quot;langues&quot; onchange=&quot;this.form.submit();&quot;&gt;&#39;.&quot;\n&quot;;<br/>
+$selected = false;<br/>
+foreach ($languages as $i_langue) {<br/>
+  $langueswitcher .= &#39;&lt;option value=&quot;&#39;.$i_langue.&#39;&quot;&#39;;<br/>
+  if($selected === false &amp;&amp; $langue == $i_langue) {<br/>
+  	$langueswitcher .= &#39; selected &#39;;<br/>
+  	$selected = true;<br/>
+  }<br/>
+  $langueswitcher .= &#39;&gt;&#39;.$i_langue.&#39;&lt;/option&gt;&#39;.&quot;\n&quot;;<br/>
+}<br/>
+$langueswitcher .= &#39;&lt;/select&gt;&lt;/form&gt;&#39;;<br/>
+include &#39;wamplangues/add_vhost_english.php&#39;;<br/>
+if(file_exists(&#39;wamplangues/add_vhost_&#39;.$langue.&#39;.php&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;$langue_temp = $langues;<br/>
+&nbsp;&nbsp;&nbsp;include &#39;wamplangues/add_vhost_&#39;.$langue.&#39;.php&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$langues = array_merge($langue_temp, $langues);<br/>
+}<br/>
+include &#39;wamplangues/help_english.php&#39;;<br/>
+if(file_exists(&#39;wamplangues/help_&#39;.$langue.&#39;.php&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;$langue_temp = $langues;<br/>
+&nbsp;&nbsp;&nbsp;include &#39;wamplangues/help_&#39;.$langue.&#39;.php&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$langues = array_merge($langue_temp, $langues);<br/>
+}<br/>
+<br/>
+//***** End of languages *****<br/>
+<br/>
+// Automatic error correction?<br/>
+$automatique = (isset($_POST[&#39;correct&#39;]) ? true : false);<br/>
+<br/>
+$message_ok = &#39;&#39;;<br/>
+$message = array();<br/>
+$errors = $errors_auto = $vhost_created = $alias_created = false;<br/>
+$sub_menu_on = true;<br/>
+<br/>
+//***** Alias values *****<br/>
+$noDBMS = false; //Only to avoid error<br/>
+$aliasContents = $AliasModify = &#39;&#39;;<br/>
+// Get Alias, PhpMyAdmin, Adminer &amp; PhpSysInfo versions and parameters<br/>
+GetAliasVersions();<br/>
+// Create alias menu<br/>
+if(is_dir($aliasDir)) {<br/>
+&nbsp;&nbsp;&nbsp;$PMyAdNotSeen = true;<br/>
+&nbsp;&nbsp;&nbsp;$handle=opendir($aliasDir);<br/>
+&nbsp;&nbsp;&nbsp;while (false !== ($file = readdir($handle))) {<br/>
+&nbsp;&nbsp;&nbsp;  if(is_file($aliasDir.$file) &amp;&amp; strstr($file, &#39;.conf&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$href = $file = str_replace(&#39;.conf&#39;,&#39;&#39;,$file);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$file][&#39;OK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$file][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[$file][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup .= &quot;&lt;p style=&#39;margin:&ndash;9px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$Alias_Contents[$file][&#39;fcgidPHP&#39;].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$aliasContents .= &quot;&lt;li&gt;&lt;i&gt;Alias : &lt;/i&gt;&lt;span style=&#39;color:blue;&#39;&gt;&quot;.$file.&quot;&lt;/span&gt;&quot;.$file_sup.&#39;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasModify .= &quot;&lt;li&gt;&lt;i&gt;Alias : &lt;/i&gt;&lt;input type=&#39;radio&#39; name=&#39;alias_modify&#39; value=&#39;&quot;.$file.&quot;&#39;/&gt; &quot;.$file.$file_sup.&quot;&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;  }<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;closedir($handle);<br/>
+}<br/>
+if(empty($aliasContents))<br/>
+&nbsp;&nbsp;&nbsp;$aliasContents = &quot;&lt;li class=&#39;phpmynot&#39;&gt;&quot;.$langues[&#39;txtNoAlias&#39;].&quot;&lt;/li&gt;\n&quot;;<br/>
+//***** End of Alias *****<br/>
+<br/>
+//***** VirtualHost values and parameters *****<br/>
+$VirtualHostMenu = !empty($wampConf[&#39;VirtualHostSubMenu&#39;]) ? $wampConf[&#39;VirtualHostSubMenu&#39;] : &quot;off&quot;;<br/>
+if($VirtualHostMenu !== &quot;on&quot;) {<br/>
+&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.$langues[&#39;VirtualSubMenuOn&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;$sub_menu_on = false;<br/>
+}<br/>
+<br/>
+/* Some tests about httpd&ndash;vhosts.conf file */<br/>
+$virtualHost = check_virtualhost();<br/>
+//***** End for VirtualHost<br/>
+<br/>
+//***** Items for form *****<br/>
+//***** VirtualHost port form<br/>
+$listenPort = listen_ports($c_apacheConfFile);<br/>
+$w_VirtualPortForm = &#39;&#39;;<br/>
+$authorizedPorts = array();<br/>
+if(count($listenPort) &gt; 1) {<br/>
+&nbsp;&nbsp;&nbsp;$c_listenPort = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;foreach($listenPort as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($value != &#39;80&#39; &amp;&amp; $value != $c_UsedPort) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$c_listenPort .= $value.&quot; &quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$authorizedPorts[] = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;$w_VirtualPortForm = &lt;&lt;&lt; EOF<br/>
+&lt;input class=&#39;portfcgi&#39; type=&#39;checkbox&#39; name=&#39;vh_port_on&#39; value=&#39;on&#39;&gt;<br/>
+&lt;label&gt;{$langues[&#39;VirtualHostPort&#39;]}&lt;code class=&quot;option&quot;&gt;&lt;i&gt;{$langues[&#39;Optional&#39;]}&lt;/i&gt;&lt;/code&gt;&lt;/label&gt;&lt;br&gt;<br/>
+&lt;select class=&#39;fcgiport&#39; name=&#39;vh_port&#39;&gt;<br/>
+EOF;<br/>
+&nbsp;&nbsp;&nbsp;foreach($authorizedPorts as $authPort) {<br/>
+  	$w_VirtualPortForm .= &quot;&lt;option value=&#39;&quot;.$authPort.&quot;&#39;&gt;Listen Port&amp;nbsp;:&amp;nbsp;&quot;.$authPort.&quot;&amp;nbsp;&amp;nbsp;&lt;/option&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;$w_VirtualPortForm .= &quot;&lt;/select&gt;&lt;br&gt;&quot;;<br/>
+<br/>
+}<br/>
+else {<br/>
+&nbsp;&nbsp;&nbsp;$w_VirtualPortForm = &lt;&lt;&lt; EOF<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;label&gt;{$langues[&#39;VirtualHostPortNone&#39;]}&lt;code class=&quot;option&quot;&gt;&lt;i&gt;{$langues[&#39;Optional&#39;]}&lt;/i&gt;&lt;/code&gt;&lt;/label&gt;&lt;br&gt;&lt;br&gt;<br/>
+EOF;<br/>
+}<br/>
+//***** End VirtualHost port form<br/>
+//***** VirtualHost IP form<br/>
+$w_VirtualIPForm = &lt;&lt;&lt; EOF<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;label&gt;{$langues[&#39;VirtualHostIP&#39;]}&lt;code class=&quot;option&quot;&gt;&lt;i&gt;{$langues[&#39;Optional&#39;]}&lt;/i&gt;&lt;/code&gt;&lt;/label&gt;&lt;br&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;optional&#39; type=&quot;text&quot; name=&quot;vh_ip&quot;/&gt;&lt;br&gt;<br/>
+EOF;<br/>
+//***** End of VirtualHost IP form<br/>
+//********************************<br/>
+<br/>
+//********************************<br/>
+//***** See or not see forms *****<br/>
+//To not see form to suppress VirtualHost<br/>
+$seeVhostDelete = (isset($_POST[&#39;seedelete&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;seedelete&#39;])) == &#39;afficher&#39;) ? true : false;<br/>
+//To not see form to modify VirtualHost<br/>
+$seeVhostModify = (isset($_POST[&#39;seemodify&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;seemodify&#39;])) == &#39;afficher&#39;) ? true : false;<br/>
+//To not see form to modify Alias<br/>
+$seeAliasModify = (isset($_POST[&#39;seealiasmod&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;seealiasmod&#39;])) == &#39;afficher&#39;) ? true : false;<br/>
+$styleOpaNoClick = ($seeVhostDelete || $seeVhostModify || $seeAliasModify) ? &quot; style=&#39;opacity:0.45;pointer&ndash;events:none;&#39;&quot; : &#39;&#39;;<br/>
+$aliasDisplay = ($seeVhostDelete || $seeVhostModify || $seeAliasModify) ? &quot; style=&#39;display:none;&#39;&quot; : &#39;&#39;;<br/>
+<br/>
+/* If form suppress VirtualHost submitted */<br/>
+if(isset($_POST[&#39;vhostdelete&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset ($_SESSION[&#39;passdel&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_POST[&#39;checkdelete&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; strip_tags(trim($_POST[&#39;checkdelete&#39;])) == $_SESSION[&#39;passdel&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;virtual_del&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = file_get_contents($c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myHostsContents = file_get_contents($c_hostsFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb = count($_POST[&#39;virtual_del&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$replaceVhosts = $replaceHosts = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for($i = 0; $i &lt; $nb ;$i++) { //for b1<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value = strip_tags(trim($_POST[&#39;virtual_del&#39;][$i]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!in_array($value, $virtualHost) || $value == &#39;localhost&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;break;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$p_value = preg_quote($value);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($value, $virtualHost[&#39;ServerName&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Extract &lt;VirtualHost... &lt;/VirtualHost&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$mask = &quot;{<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;VirtualHost                         # beginning of VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[^&lt;]*(?:&lt;(?!/VirtualHost)[^&lt;]*)*     # avoid premature end<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\n\s*ServerName\s+{$p_value}\s*\n    # Test server name<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.*?                                  # we stop as soon as possible<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/VirtualHost&gt;\s*\n                  # end of VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}isx&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($mask,$myVhostsContents,$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = str_replace($matches[0],&#39;&#39;,$myVhostsContents, $count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$replaceVhosts = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($replaceVhosts) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Suppress ServerName into hosts file<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = $count1 = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myHostsContents = preg_replace(&quot;~^([0&ndash;9\.:]+\s+&quot;.$p_value.&quot;\r?\n?)~mi&quot;,&#39;&#39;,$myHostsContents,&ndash;1, $count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myHostsContents = str_ireplace($value,&#39;&#39;,$myHostsContents,$count1);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0 || $count1 &gt; 0 ) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$replaceHosts = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;ServerName &#39;.$value.&#39; doesn\&#39;t exist&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;} //End for b1<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($replaceVhosts) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Cleaning of httpd&ndash;vhosts.conf file<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = clean_file_contents($myVhostsContents.&quot;\r\n#\r\n&quot;,array(1,0),false,true,true,$c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($replaceHosts) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;replaceHosts = true&quot;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($wampConf[&#39;BackupHosts&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;@copy($c_hostsFile,$c_hostsFile.&quot;_wampsave.&quot;.$next_hosts_save);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$next_hosts_save++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Cleaning of hosts file<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myHostsContents = clean_file_contents($myHostsContents,array(2,0),true);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp = fopen($c_hostsFile, &#39;r+b&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(flock($fp, LOCK_EX)) { // acquire an exclusive lock<br/>
+    		ftruncate($fp, 0);      // truncate file<br/>
+    		fwrite($fp, $myHostsContents);<br/>
+    		fflush($fp);            // flush output before releasing the lock<br/>
+    		flock($fp, LOCK_UN);    // release the lock<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;Unable to write to &#39;.$c_hostsFile.&#39; file&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+/* If form modify VirtualHost submitted */<br/>
+if(isset($_POST[&#39;vhostmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset ($_SESSION[&#39;passmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_POST[&#39;checkmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; strip_tags(trim($_POST[&#39;checkmodify&#39;])) == $_SESSION[&#39;passmodify&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;virtual_modify&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;name&#39;] = strip_tags(trim($_POST[&#39;virtual_modify&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = file_get_contents($c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToModify = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($VhostToMod[&#39;name&#39;], $virtualHost[&#39;ServerName&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Extract &lt;VirtualHost... &lt;/VirtualHost&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$p_value = preg_quote($VhostToMod[&#39;name&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$mask = &quot;{<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;VirtualHost                         # beginning of VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[^&lt;]*(?:&lt;(?!/VirtualHost)[^&lt;]*)*     # avoid premature end<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\n\s*ServerName\s+{$p_value}\s*\n    # Test server name<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.*?                                  # we stop as soon as possible<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/VirtualHost&gt;\s*\n                  # end of VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}isx&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($mask,$myVhostsContents,$matches) === 1){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//$matches[0] = complete &lt;VirtualHost ...&lt;/VirtulaHost&gt; structure<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToModify = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;original&#39;] = $matches[0];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Does this VirtualHost use FCGI mode?<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;fcgi&#39;] = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameFcgid&#39;][$VhostToMod[&#39;name&#39;]] &amp;&amp; $virtualHost[&#39;ServerNameFcgidPHPOK&#39;][$VhostToMod[&#39;name&#39;]]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;fcgi&#39;] = $virtualHost[&#39;ServerNameFcgidPHP&#39;][$VhostToMod[&#39;name&#39;]];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//What is the directory of this VirtualHost?<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//&lt;Directory &quot;G:/www/faq&ndash;fra/&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;directory&#39;] = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^[ \t]*&lt;Directory.*&quot;(.*)&quot;&gt;.*\r?$~mi&#39;,$VhostToMod[&#39;original&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;directory&#39;] = $matches[1];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Does this VirtualHost use https ?<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($VhostToMod[&#39;name&#39;], $virtualHost[&#39;ServerNameHttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpdsslFileContents = file_get_contents($c_apacheConfDir.&#39;/extra/httpd&ndash;ssl.conf&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Extract Define SERVERNAMEVHOSTSSL ServerName &lt;/VirtualHost&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$mask = &quot;~^Define SERVERNAMEVHOSTSSL {$p_value}.*?&lt;/VirtualHost&gt;\r?$~mis&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($mask,$httpdsslFileContents,$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;originalhttps&#39;] = $matches[0];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;VhostToMod=\n&quot;.print_r($VhostToMod,true));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$serialModify = json_encode($VhostToMod);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;unset($myVhostsContents,$httpdsslFileContents);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+/* If form modify Alias submitted */<br/>
+if(isset($_POST[&#39;aliasmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset ($_SESSION[&#39;aliaspassmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_POST[&#39;aliascheckmodify&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; strip_tags(trim($_POST[&#39;aliascheckmodify&#39;])) == $_SESSION[&#39;aliaspassmodify&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;alias_modify&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;name&#39;] = strip_tags(trim($_POST[&#39;alias_modify&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($AliasToMod[&#39;name&#39;],$Alias_Contents[&#39;alias&#39;])){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;path&#39;] = $aliasDir.$AliasToMod[&#39;name&#39;].&#39;.conf&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;directory&#39;] = $aliasDir.$AliasToMod[&#39;name&#39;].&#39;.conf&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;original&#39;] = file_get_contents($AliasToMod[&#39;directory&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToModify = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Does this Alias use FCGI mode?<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;fcgi&#39;] = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$AliasToMod[&#39;name&#39;]][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[$AliasToMod[&#39;name&#39;]][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;fcgi&#39;] = $Alias_Contents[$AliasToMod[&#39;name&#39;]][&#39;fcgidPHP&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//What is the directory of this Alias?<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//&lt;Directory &quot;G:/www/faq&ndash;fra/&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;directory&#39;] = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^[ \t]*&lt;Directory.*&quot;(.*)&quot;&gt;.*\r?$~mi&#39;,$AliasToMod[&#39;original&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;directory&#39;] = $matches[1];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$serialModify = json_encode($AliasToMod);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+//***** Is form add or modify Vhost or Alias submitted ? ******<br/>
+if(isset($_POST[&#39;submit&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; $errors === false<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_SESSION[&#39;passadd&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_POST[&#39;checkadd&#39;])<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; strip_tags(trim($_POST[&#39;checkadd&#39;])) == $_SESSION[&#39;passadd&#39;]<br/>
+&nbsp;&nbsp;&nbsp;&amp;&amp; isset($_POST[&#39;addmodify&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;if(strip_tags(trim($_POST[&#39;addmodify&#39;])) == &#39;modify&#39;) { //Modify VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Modify VirtualHost &ndash; add FCGI mode &ndash; change FCGI PHP version &ndash; Suppress FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostModified = $VhostHttpsModified = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_name = strip_tags(trim($_POST[&#39;vh_name&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;vh_fcgi_on&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;vh_fcgi_on&#39;])) == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = strip_tags(trim($_POST[&#39;vh_fcgi_php&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod = json_decode($_POST[&#39;modifycontent&#39;],true);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;vh_name=&quot;.$vh_name.&quot; &ndash; fcgi=&quot;.$vh_fcgi_php);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;VhostToMod=\n&quot;.print_r($VhostToMod,true));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($vh_fcgi_php)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Asked for FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostToMod[&#39;fcgi&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Is alredy FCGI<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($VhostToMod[&#39;fcgi&#39;] != $vh_fcgi_php) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Change FCGI PHP version<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Get line Define FCGIPHPVERSION &quot;x.y.z&quot;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^\s*Define\s+FCGIPHPVERSION\s+&quot;([0&ndash;9.]+)&quot;\r?$~mi&#39;,$VhostToMod[&#39;original&#39;],$matches) === 1){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($matches[1] == $VhostToMod[&#39;fcgi&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = $counts = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newphp&#39;] = str_replace($VhostToMod[&#39;fcgi&#39;],$vh_fcgi_php,$matches[0],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = str_replace($matches[0],$VhostToMod[&#39;newphp&#39;],$VhostToMod[&#39;original&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($counts == 2) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = clean_string_var($VhostToMod[&#39;new&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Change FCGI PHP version in HTTPS<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostToMod[&#39;originalhttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Get line Define FCGIPHPVERSION &quot;x.y.z&quot;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^\s*Define\s+FCGIPHPVERSION\s+&quot;([0&ndash;9.]+)&quot;\r?$~mi&#39;,$VhostToMod[&#39;originalhttps&#39;],$matches) === 1){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($matches[1] == $VhostToMod[&#39;fcgi&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = $counts = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newphp&#39;] = str_replace($VhostToMod[&#39;fcgi&#39;],$vh_fcgi_php,$matches[0],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = str_replace($matches[0],$VhostToMod[&#39;newphp&#39;],$VhostToMod[&#39;originalhttps&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($counts == 2) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = clean_string_var($VhostToMod[&#39;newhttps&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostHttpsModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Is not FCGI &ndash; Mode FCGI to add<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^\s*\&lt;/VirtualHost\&gt;\r?$~mi&#39;,$VhostToMod[&#39;original&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpd_vhosts_fcgi = &lt;&lt;&lt; EOFFCGIPHP<br/>
+  &lt;IfModule fcgid_module&gt;<br/>
+    Define FCGIPHPVERSION &quot;{$vh_fcgi_php}&quot;<br/>
+    FcgidInitialEnv PHPRC \${PHPROOT}\${FCGIPHPVERSION}<br/>
+    &lt;Files ~ &quot;\.php$&quot;&gt;<br/>
+      Options +Indexes +Includes +FollowSymLinks +MultiViews +ExecCGI<br/>
+      AddHandler fcgid&ndash;script .php<br/>
+      FcgidWrapper &quot;\${PHPROOT}\${FCGIPHPVERSION}/php&ndash;cgi.exe&quot; .php<br/>
+    &lt;/Files&gt;<br/>
+  &lt;/IfModule&gt;<br/>
+<br/>
+EOFFCGIPHP;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = str_replace($matches[0],$httpd_vhosts_fcgi.$matches[0],$VhostToMod[&#39;original&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = clean_string_var($VhostToMod[&#39;new&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostToMod[&#39;originalhttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^\s*\&lt;/VirtualHost\&gt;\r?$~mi&#39;,$VhostToMod[&#39;originalhttps&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = str_replace($matches[0],$httpd_vhosts_fcgi.$matches[0],$VhostToMod[&#39;originalhttps&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = clean_string_var($VhostToMod[&#39;newhttps&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostHttpsModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//FCGI mode not wanted<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostToMod[&#39;fcgi&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//To suppress FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^[ \t]*\&lt;IfModule fcgid_module\&gt;.*\&lt;/IfModule\&gt;\r?$~ism&#39;,$VhostToMod[&#39;original&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = str_replace($matches[0],&#39;&#39;,$VhostToMod[&#39;original&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0 ) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;new&#39;] = clean_string_var($VhostToMod[&#39;new&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostToMod[&#39;originalhttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^[ \t]*\&lt;IfModule fcgid_module\&gt;.*\&lt;/IfModule\&gt;\r?$~ism&#39;,$VhostToMod[&#39;originalhttps&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = str_replace($matches[0],&#39;&#39;,$VhostToMod[&#39;originalhttps&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0 ) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostToMod[&#39;newhttps&#39;] = clean_string_var($VhostToMod[&#39;newhttps&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostHttpsModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($VhostModified || $VhostHttpsModified) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = $counts = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($VhostModified) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpVhostsContents = file_get_contents($c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpVhostsContents = str_replace($VhostToMod[&#39;original&#39;],$VhostToMod[&#39;new&#39;],$httpVhostsContents,$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(write_file($c_apacheVhostConfFile,$httpVhostsContents)) $counts++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($VhostHttpsModified) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpdsslFileContents = file_get_contents($c_apacheConfDir.&#39;/extra/httpd&ndash;ssl.conf&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpdsslFileContents = str_replace($VhostToMod[&#39;originalhttps&#39;],$VhostToMod[&#39;newhttps&#39;],$httpdsslFileContents,$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(write_file($c_apacheConfDir.&#39;/extra/httpd&ndash;ssl.conf&#39;,$httpdsslFileContents)) $counts++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($counts &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok = &#39;&lt;p class=&quot;ok&quot;&gt;&#39;.sprintf($langues[&#39;VirtualCreated&#39;],$VhostToMod[&#39;name&#39;]).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok .= &#39;&lt;p class=&quot;ok_plus&quot;&gt;&#39;.$langues[&#39;However&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhost_created = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.$langues[&#39;NoModify&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}//End Vhost modify procedure<br/>
+&nbsp;&nbsp;&nbsp;elseif(strip_tags(trim($_POST[&#39;addmodify&#39;])) == &#39;modifyalias&#39;) { // Modify Alias<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasModified = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_name = strip_tags(trim($_POST[&#39;vh_name&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;vh_fcgi_on&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;vh_fcgi_on&#39;])) == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = strip_tags(trim($_POST[&#39;vh_fcgi_php&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod = json_decode($_POST[&#39;modifycontent&#39;],true);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($vh_fcgi_php)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Asked for FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($AliasToMod[&#39;fcgi&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Is alredy FCGI<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($AliasToMod[&#39;fcgi&#39;] != $vh_fcgi_php) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Change FCGI PHP version<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Get line Define FCGIPHPVERSION &quot;x.y.z&quot;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match(&#39;~^[ \t]*Define FCGIPHPVERSION &quot;([0&ndash;9.]+)&quot;\r$~mi&#39;,$AliasToMod[&#39;original&#39;],$matches) === 1){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($matches[1] == $AliasToMod[&#39;fcgi&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = $counts = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;newphp&#39;] = str_replace($AliasToMod[&#39;fcgi&#39;],$vh_fcgi_php,$matches[0],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = str_replace($matches[0],$AliasToMod[&#39;newphp&#39;],$AliasToMod[&#39;original&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts += $count;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($counts == 2) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = clean_string_var($AliasToMod[&#39;new&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}//End change FCGI PHP version<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Is not FCGI &ndash; Mode FCGI to add<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$firstPart = &lt;&lt;&lt; EOF<br/>
+&lt;IfModule fcgid_module&gt;<br/>
+  Define FCGIPHPVERSION &quot;{$vh_fcgi_php}&quot;<br/>
+  FcgidCmdOptions \${PHPROOT}\${FCGIPHPVERSION}/php&ndash;cgi.exe \\<br/>
+  InitialEnv PHPRC=\${PHPROOT}\${FCGIPHPVERSION}/php.ini<br/>
+&lt;/IfModule&gt;<br/>
+<br/>
+EOF;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$secondPart = &lt;&lt;&lt; EOF<br/>
+  &lt;IfModule fcgid_module&gt;<br/>
+    &lt;Files ~ &quot;\.php$&quot;&gt;<br/>
+      Options +Indexes +Includes +FollowSymLinks +MultiViews +ExecCGI<br/>
+      AddHandler fcgid&ndash;script .php<br/>
+      FcgidWrapper &quot;\${PHPROOT}\${FCGIPHPVERSION}/php&ndash;cgi.exe&quot; .php<br/>
+    &lt;/Files&gt;<br/>
+  &lt;/IfModule&gt;<br/>
+<br/>
+EOF;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$counts = &#39;0&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pattern = array(&#39;~^[ \t]*\&lt;Directory.*&quot;(.*)&quot;&gt;.*\r?$~mi&#39;,&#39;~^[ \t]*\&lt;/Directory\&gt;.*\r?$~mi&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$replace = array($firstPart.&#39;${0}&#39;,$secondPart.&#39;${0}&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = preg_replace($pattern,$replace,$AliasToMod[&#39;original&#39;],&ndash;1,$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!is_null($AliasToMod[&#39;new&#39;]) &amp;&amp; $count == 2) $AliasModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}//End add FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//FCGI mode not wanted<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($AliasToMod[&#39;fcgi&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//To suppress FCGI mode<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count = 0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Search for first &lt;IfModule...<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$p_value = preg_quote($AliasToMod[&#39;fcgi&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$mask = &quot;{<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\&lt;IfModule\s+fcgid_module            # beginning<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[^&lt;]*(?:&lt;(?!/IfModule)[^&lt;]*)*        # avoid premature end<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\n\s*Define.*{$p_value}\s*\n         # Test Define<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.*?                                  # we stop as soon as possible<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\&lt;/IfModule\&gt;\s*\n                   # end<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}isx&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($mask,$AliasToMod[&#39;original&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;matches1=\n&quot;.print_r($matches,true));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = str_ireplace($matches[0],&#39;&#39;,$AliasToMod[&#39;original&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$count =0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Search for second &lt;IfModule...<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$mask = &quot;~^[\t ]*\&lt;IfModule\s+fcgid_module.*FcgidWrapper.*\&lt;/IfModule\&gt;\r?$~mis&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($mask,$AliasToMod[&#39;new&#39;],$matches) === 1) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;matches2=\n&quot;.print_r($matches,true));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = str_ireplace($matches[0],&#39;&#39;,$AliasToMod[&#39;new&#39;],$count);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($count &gt; 0) $AliasModified = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}//End of suppress FCGI<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($AliasModified) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Clean new Alias and write it<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$AliasToMod[&#39;new&#39;] = clean_file_contents($AliasToMod[&#39;new&#39;].&quot;\r\n#\r\n&quot;,array(1,0),false, true);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(write_file($AliasToMod[&#39;path&#39;],$AliasToMod[&#39;new&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok = &#39;&lt;p class=&quot;ok&quot;&gt;&#39;.sprintf($langues[&#39;ModifiedAlias&#39;],$AliasToMod[&#39;name&#39;]).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok .= &#39;&lt;p class=&quot;ok_plus&quot;&gt;&#39;.$langues[&#39;HoweverAlias&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$alias_created = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.$langues[&#39;NoModifyAlias&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}//End Alias modify procedure<br/>
+&nbsp;&nbsp;&nbsp;elseif(strip_tags(trim($_POST[&#39;addmodify&#39;])) == &#39;add&#39;) { //Add VirtualHost<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//***** Create Vhost submitted<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Escape any backslashes used in the path to the file<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//$c_apacheVhostConfFile = str_replace(&#39;\\&#39;, &#39;\\\\&#39;, $c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_name = strip_tags(trim($_POST[&#39;vh_name&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_ip = (isset($_POST[&#39;vh_ip&#39;])) ? strip_tags(trim($_POST[&#39;vh_ip&#39;])) : &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_port = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;vh_port_on&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;vh_port_on&#39;])) == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_port = strip_tags(trim($_POST[&#39;vh_port&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($_POST[&#39;vh_fcgi_on&#39;]) &amp;&amp; strip_tags(trim($_POST[&#39;vh_fcgi_on&#39;])) == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_on = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_fcgi_php = strip_tags(trim($_POST[&#39;vh_fcgi_php&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_folder = str_replace(array(&#39;\\&#39;,&#39;//&#39;), &#39;/&#39;,strip_tags(trim($_POST[&#39;vh_folder&#39;])));<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(substr($vh_folder,&ndash;1) == &quot;/&quot;)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_folder = substr($vh_folder,0,&ndash;1);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_folder = strtolower($vh_folder);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//3.0.6 &ndash; Check / at first character<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(substr($vh_folder,0,1) == &quot;/&quot; &amp;&amp; substr($vh_folder,0,2) != &quot;//&quot;)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_folder = &quot;/&quot;.$vh_folder;<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;FirstServerName&#39;] !== &quot;localhost&quot; &amp;&amp; $errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;NoFirst&#39;],$c_apacheVhostConfFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/* Validity of the domain name */<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;clearstatcache(); // added for update 3.1.4<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check if IDN is needed<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_nameIDN = idn_to_ascii($vh_name,IDNA_DEFAULT,INTL_IDNA_VARIANT_UTS46);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($vh_nameIDN !== $vh_name)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_name = $vh_nameIDN;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$regexIDNA = &#39;#^([\w&ndash;]+://?|www[\.])?xn&ndash;&ndash;[a&ndash;z0&ndash;9]+[a&ndash;z0&ndash;9\&ndash;\.]*[a&ndash;z0&ndash;9]+(\.[a&ndash;z]{2,7})?$#&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Not IDNA  /^[A&ndash;Za&ndash;z]+([&ndash;.](?![&ndash;.])|[A&ndash;Za&ndash;z0&ndash;9]){1,60}[A&ndash;Za&ndash;z0&ndash;9]$/<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$regexServerName = 	&#39;/^<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(?=.*[A&ndash;Za&ndash;z]) # at least one letter somewhere<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[A&ndash;Za&ndash;z0&ndash;9]+ 	 # letter or number in first place<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;([&ndash;.](?![&ndash;.])	 #  a . or &ndash; not followed by . or &ndash;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|					 #   or<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[A&ndash;Za&ndash;z0&ndash;9]		 #  a letter or a number<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;){0,60}				 # this, repeated from 0 to 60 times &ndash; at least two characters<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[A&ndash;Za&ndash;z0&ndash;9]		 # letter or number at the end<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$/x&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(preg_match($regexIDNA,$vh_name,$matchesIDNA) == 0<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&amp;&amp; preg_match($regexServerName,$vh_name) == 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;ServerNameInvalid&#39;],$vh_name).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($wampConf[&#39;NotVerifyTLD&#39;] == &#39;off&#39; &amp;&amp; substr($vh_name,&ndash;4) !== false &amp;&amp; (strtolower(substr($vh_name,&ndash;4) == &#39;.dev&#39;))) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;txtTLDdev&#39;],$vh_name,&quot;.dev&quot;).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif((!file_exists($vh_folder) || !is_dir($vh_folder))) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;DirNotExists&#39;],$vh_folder).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(strtolower($vh_folder) == strtolower($wwwDir)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;NotwwwDir&#39;],$vh_folder).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($c_hostsFile_writable !== true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;FileNotWritable&#39;],$c_hostsFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($wampConf[&#39;NotCheckDuplicate&#39;] == &#39;off&#39; &amp;&amp; array_key_exists(strtolower($vh_name), array_change_key_case($virtualHost[&#39;ServerName&#39;], CASE_LOWER))) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(empty($vh_port) || !in_array($vh_port, $authorizedPorts)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;VirtualAlreadyExist&#39;],$vh_name).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$c_UsedIp = &#39;*&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$c_HostIp = &#39;127.0.0.1&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($errors === false &amp;&amp; !empty($vh_ip)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($vh_ip == &#39;127.0.0.0&#39; || $vh_ip == &#39;127.0.0.1&#39; ) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;VirtualIpAlreadyUsed&#39;],$vh_ip).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Validit&#233; IP locale<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(check_IP_local($vh_ip) === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;LocalIpInvalid&#39;],$vh_ip).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(in_array($vh_ip, $virtualHost[&#39;virtual_ip&#39;]) &amp;&amp; $wampConf[&#39;NotCheckDuplicate&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;VirtualIpAlreadyUsed&#39;],$vh_ip).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$c_UsedIp = $c_HostIp = $vh_ip;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($errors === false &amp;&amp; !empty($vh_port)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($vh_port == &#39;80&#39; || $vh_port == $c_UsedPort) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;VirtualPortExist&#39;],$vh_port).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(!in_array($vh_port, $authorizedPorts)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.sprintf($langues[&#39;VirtualPortNotExist&#39;],$vh_port).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$key = array_search($vh_port, $c_ApacheDefine);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$c_PortToUse = &#39;{$&#39;.$key.&#39;}&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/* Preparation of files content */<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpd_vhosts_fcgi = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($vh_fcgi_on) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpd_vhosts_fcgi = &lt;&lt;&lt; EOFFCGIPHP<br/>
+<br/>
+  &lt;IfModule fcgid_module&gt;<br/>
+    Define FCGIPHPVERSION &quot;{$vh_fcgi_php}&quot;<br/>
+    FcgidInitialEnv PHPRC \${PHPROOT}\${FCGIPHPVERSION}<br/>
+    &lt;Files ~ &quot;\.php$&quot;&gt;<br/>
+      Options +Indexes +Includes +FollowSymLinks +MultiViews +ExecCGI<br/>
+      AddHandler fcgid&ndash;script .php<br/>
+      FcgidWrapper &quot;\${PHPROOT}\${FCGIPHPVERSION}/php&ndash;cgi.exe&quot; .php<br/>
+    &lt;/Files&gt;<br/>
+  &lt;/IfModule&gt;<br/>
+EOFFCGIPHP;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpd_vhosts_add = &lt;&lt;&lt; EOFNEWVHOST<br/>
+<br/>
+#<br/>
+&lt;VirtualHost {$c_UsedIp}:{$c_PortToUse}&gt;<br/>
+&nbsp;&nbsp;&nbsp;ServerName {$vh_name}<br/>
+&nbsp;&nbsp;&nbsp;DocumentRoot &quot;{$vh_folder}&quot;<br/>
+&nbsp;&nbsp;&nbsp;&lt;Directory  &quot;{$vh_folder}/&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Options +Indexes +Includes +FollowSymLinks +MultiViews<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;AllowOverride All<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Require local<br/>
+&nbsp;&nbsp;&nbsp;&lt;/Directory&gt;{$httpd_vhosts_fcgi}<br/>
+&lt;/VirtualHost&gt;<br/>
+#<br/>
+<br/>
+EOFNEWVHOST;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$hosts_add = &lt;&lt;&lt; EOFHOSTS<br/>
+<br/>
+{$c_HostIp}	{$vh_name}<br/>
+::1	{$vh_name}<br/>
+<br/>
+EOFHOSTS;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/* Opening the files to add the lines */<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($wampConf[&#39;BackupHosts&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;@copy($c_hostsFile,$c_hostsFile.&quot;_wampsave.&quot;.$next_hosts_save);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$next_hosts_save++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp1 = fopen($c_apacheVhostConfFile, &#39;a+b&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp2 = fopen($c_hostsFile, &#39;a+b&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp1w = $fpw2 = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(fwrite($fp1, $httpd_vhosts_add) !== false) $fp1w = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(fwrite($fp2, $hosts_add) !== false) $fp2w = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp1);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp2);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Clean httpd&ndash;vhosts.conf file<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = file_get_contents($c_apacheVhostConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$myVhostsContents = clean_file_contents($myVhostsContents.&quot;\r\n#\r\n&quot;,array(1,0),false, true, true, $c_apacheVhostConfFile);<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($fp1w === true &amp;&amp; $fp2w === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(&quot;Possible&quot; === true) { // It is not possible &#8212; for the moment &#8212; to do that from php WEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Restart DNS<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$command = &#39;CMD /D /C ipconfig /flushdns&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$output = `$command`;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Apache Graceful Restart<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$command = &#39;CMD /D /C &#39;.str_replace(&#39;/&#39;,&#39;\\&#39;,$c_apacheExe).&#39; &ndash;n &#39;.$c_apacheService.&#39; &ndash;k restart&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$output .= `$command`;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$command = &#39;CMD /D /C START /D &#39;.str_replace(&#39;/&#39;,&#39;\\&#39;,$c_installDir).&#39;\scripts /WAIT /B &#39;.str_replace(&#39;/&#39;,&#39;\\&#39;,$c_phpExe).&#39; &ndash;f refresh.php&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;command=\n&quot;.$command);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$output = `$command`;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//error_log(&quot;output=\n&quot;.$output);<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Message to Refresh Wampmanager to update menu&#39;s<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok = &#39;&lt;p class=&quot;ok&quot;&gt;&#39;.sprintf($langues[&#39;VirtualCreated&#39;],$vh_name).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok .= &#39;&lt;p class=&quot;ok_plus&quot;&gt;&#39;.$langues[&#39;HoweverWamp&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhost_created = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok = &#39;&lt;p class=&quot;ok&quot;&gt;&#39;.sprintf($langues[&#39;VirtualCreated&#39;],$vh_name).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message_ok .= &#39;&lt;p class=&quot;ok_plus&quot;&gt;&#39;.$langues[&#39;However&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhost_created = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning&quot;&gt;&#39;.$langues[&#39;NoModify&#39;].&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}//End VirtulHost create procedure<br/>
+}//End forms modify and create<br/>
+<br/>
+//***** FCGI select PHP version form *****<br/>
+//*****  Modal Dialog FCGI mode help *****<br/>
+$w_FcgiPhpVersionForm = $ModalDialogs = $ModalFCGILink = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;//**** Modal Dialogs *****<br/>
+&nbsp;&nbsp;&nbsp;//See mode FCGI<br/>
+&nbsp;&nbsp;&nbsp;$message_modal = str_replace(&#39;  &#39;,&#39;&amp;nbsp;&amp;nbsp;&#39;,$langues[&#39;fcgi_mode_help&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;$message_modal = str_replace(&#39;&lt;code&gt;&#39;,&quot;&lt;code class=&#39;normal&#39;&gt;&quot;,$message_modal);<br/>
+&nbsp;&nbsp;&nbsp;$message_modal = nl2br($message_modal);<br/>
+&nbsp;&nbsp;&nbsp;//Dialog modal help FCGI<br/>
+&nbsp;&nbsp;&nbsp;$divHelpFCGI = &lt;&lt;&lt; EOF<br/>
+&lt;div id=&quot;helpfcgi&quot; class=&quot;modalOtoArial&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div class=&#39;modalOtoBar&#39;&gt;&lt;input type=&#39;button&#39; value=&#39;Copy&#39; class=&#39;js&ndash;copyb&#39; data&ndash;target=&#39;#tocopyb&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;a href=&quot;#closeOto&quot; title=&quot;Close&quot; class=&quot;closeOto&quot;&gt;X&lt;/a&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&quot;tocopyb&quot;&gt;{$message_modal}&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&lt;/div&gt;<br/>
+EOF;<br/>
+&nbsp;&nbsp;&nbsp;$ModalFCGILink .= &quot;&lt;a href=&#39;#helpfcgi&#39;&gt;&lt;small style=&#39;color:#777;&#39;&gt;&quot;.$langues[&#39;fcgi_mode_link&#39;].&quot;&lt;/small&gt;&lt;/a&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$ModalDialogs .= $divHelpFCGI;<br/>
+&nbsp;&nbsp;&nbsp;//***** End of Modal Dialogs *****<br/>
+$StyleNoFcgi = $FcgiModNotLoaded = &#39;&#39;;<br/>
+if(!isset($c_ApacheDefine[&#39;PHPROOT&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;$StyleNoFcgi = &quot; style=&#39;opacity:0.6;pointer&ndash;events:none;&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$FcgiModNotLoaded = &lt;&lt;&lt; EOF<br/>
+&lt;label&gt;&lt;span style=&#39;color:red;&#39;&gt;[FCGI]&amp;nbsp;{$langues[&#39;fcgi_not_loaded&#39;]}&lt;/span&gt;&amp;nbsp;&ndash;&amp;nbsp;{$ModalFCGILink}&lt;/label&gt;&lt;br&gt;<br/>
+EOF;<br/>
+}<br/>
+$checked = (!empty($VhostToMod[&#39;fcgi&#39;]) || !empty($AliasToMod[&#39;fcgi&#39;])) ? &quot; checked=&#39;checked&#39;&quot; : &#39;&#39;;<br/>
+$w_FcgiPhpVersionForm = &lt;&lt;&lt; EOF<br/>
+&lt;input class=&#39;portfcgi&#39; type=&#39;checkbox&#39; name=&#39;vh_fcgi_on&#39; value=&#39;on&#39; {$checked}{$StyleNoFcgi}&gt;<br/>
+&lt;label{$StyleNoFcgi}&gt;{$langues[&#39;VirtualHostPhpFCGI&#39;]}&lt;code class=&quot;option&quot;&gt;&lt;i&gt;{$langues[&#39;Optional&#39;]}&lt;/i&gt;&lt;/code&gt; {$ModalFCGILink}&lt;/label&gt;&lt;br&gt;<br/>
+&lt;select class=&#39;fcgiport&#39; name=&#39;vh_fcgi_php&#39;{$StyleNoFcgi}&gt;<br/>
+EOF;<br/>
+foreach($phpVersionList as $php_FCGI) {<br/>
+&nbsp;&nbsp;&nbsp;$selected = ((!empty($VhostToMod[&#39;fcgi&#39;]) &amp;&amp; ($VhostToMod[&#39;fcgi&#39;] == $php_FCGI))<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|| (!empty($AliasToMod[&#39;fcgi&#39;]) &amp;&amp; ($AliasToMod[&#39;fcgi&#39;] == $php_FCGI))) ? &quot; selected&quot; : &#39;&#39;;<br/>
+ 	$w_FcgiPhpVersionForm .= &quot;&lt;option style=&#39;line_height:0.8em;&#39; value=&#39;&quot;.$php_FCGI.&quot;&#39; &quot;.$selected.&quot;&gt;PHP&amp;nbsp;:&amp;nbsp;&quot;.$php_FCGI.&quot;&amp;nbsp;&amp;nbsp;&lt;/option&gt;&quot;;<br/>
+}<br/>
+$w_FcgiPhpVersionForm .= &quot;&lt;/select&gt;&lt;br&gt;&quot;;<br/>
+$w_FcgiPhpVersionForm .= $FcgiModNotLoaded;<br/>
+//***** End FCGI select PHP form<br/>
+<br/>
+//***** Show VirtualHost list *****<br/>
+$VhostDefine = $VhostDelete = $VhostModify = &quot;&quot;;<br/>
+if($virtualHost[&#39;nb_Server&#39;] &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;$i = 0;<br/>
+&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;ServerName&#39;] as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$ip =&#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($virtualHost[&#39;virtual_ip&#39;][$i]))<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$ip = &quot; &ndash; VirtualHost ip = &lt;span style=&#39;color:blue;&#39;&gt;&quot;.$virtualHost[&#39;virtual_ip&#39;][$i].&#39;&lt;/span&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$UrlPortVH = ($virtualHost[&#39;ServerNamePort&#39;][$value] != &#39;80&#39;) ? &quot; &ndash; Port = &lt;span style=&#39;color:red;&#39;&gt;&quot;.$virtualHost[&#39;ServerNamePort&#39;][$value].&quot;&lt;/span&gt;&quot; : &quot;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_url = ((strpos($value, &#39;:&#39;) !== false) ? strstr($value,&#39;:&#39;,true) : $value);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff = $value_fcgi = $value_https = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$new_line = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameIDNA&#39;][$value] === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;br&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$new_line = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;span class=&#39;greenpad&#39;&gt;&lt;small&gt;IDNA&ndash;&gt; &quot;.$virtualHost[&#39;ServerNameUTF8&#39;][$value].&#39;&lt;/small&gt;&lt;/span&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVhostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($c_ApacheDefine[&#39;PHPROOT&#39;]) &amp;&amp; $virtualHost[&#39;ServerNameFcgid&#39;][$value] === true){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!$new_line) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;br&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$new_line = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVhostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;span class=&#39;greenpad&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&#39;&lt;/small&gt;&lt;/span&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_fcgi .= &quot;&lt;br&gt;&lt;span class=&#39;greenpad&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&#39;&lt;/small&gt;&lt;/span&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameFcgid&#39;][$value] === true &amp;&amp; $virtualHost[&#39;ServerNameFcgidPHPOK&#39;][$value] !== true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!$new_line) {$value_aff .= &quot;&lt;br&gt;&quot;;;$new_line=true;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;span style=&#39;color:red;padding&ndash;left:1em;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&#39; &ndash; &#39;.$langues[&#39;phpNotExists&#39;].&#39;&lt;/small&gt;&lt;/span&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($value,$virtualHost[&#39;ServerNameHttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!$new_line) {$value_aff .= &quot;&lt;br&gt;&quot;;$new_line=true;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;span class=&#39;greenpad&#39;&gt;&lt;small&gt;HTTPS&lt;/small&gt;&lt;/span&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_https .= &quot;&lt;br&gt;&lt;span class=&#39;greenpad&#39;&gt;&lt;small&gt;HTTPS&lt;/small&gt;&lt;/span&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameValid&#39;][$value] === false)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostDefine .= &quot;&lt;li&gt;&lt;i&gt;ServerName : &lt;/i&gt;&lt;span style=&#39;color:red;&#39;&gt;&quot;.$value.&quot; &ndash; ServerName syntax error&lt;/span&gt;&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostDefine .= &quot;&lt;li&gt;&lt;i&gt;ServerName : &lt;/i&gt;&lt;span style=&#39;color:blue;&#39;&gt;&quot;.$value.$value_aff.&quot;&lt;/span&gt; &ndash; &lt;i&gt;Directory : &lt;/i&gt;&quot;.$virtualHost[&#39;documentPath&#39;][$i].$UrlPortVH.$ip.&quot;&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVhostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($value != &#39;localhost&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostDelete .= &quot;&lt;li&gt;&lt;i&gt;ServerName : &lt;/i&gt;&lt;input type=&#39;checkbox&#39; name=&#39;virtual_del[]&#39; value=&#39;&quot;.$value.&quot;&#39;/&gt; &lt;span style=&#39;color:blue;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VhostModify .= &quot;&lt;li&gt;&lt;i&gt;ServerName : &lt;/i&gt;&lt;input type=&#39;radio&#39; name=&#39;virtual_modify&#39; value=&#39;&quot;.$value.&quot;&#39;/&gt; &lt;span style=&#39;color:blue;&#39;&gt;&quot;.$value.$value_fcgi.$value_https.&quot;&lt;/span&gt;&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$i++;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+//***** End Show VirtualHost list *****<br/>
+<br/>
+//***** Is Include conf/extra/httpd&ndash;vhosts.conf not commented #&nbsp;*****<br/>
+if($virtualHost[&#39;include_vhosts&#39;] === false &amp;&amp; $errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;if($automatique === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpConfFileContents = file_get_contents($c_apacheConfFile);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$httpConfFileContents = preg_replace(&quot;~^[ \t]*#[ \t]*(Include[ \t]*conf/extra/httpd&ndash;vhosts.conf.*)$~m&quot;,&quot;$1&quot;,$httpConfFileContents,1);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp = fopen($c_apacheConfFile,&#39;wb&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fwrite($fp,$httpConfFileContents);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning_auto&quot;&gt;&#39;.sprintf($langues[&#39;UncommentInclude&#39;],$c_apacheConfFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors_auto = true;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+//***** Does conf/extra/httpd&ndash;vhosts.conf file exist ?<br/>
+if($virtualHost[&#39;vhosts_exist&#39;] === false &amp;&amp; $errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;if($automatique === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp = fopen($c_apacheVhostConfFile,&#39;wb&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning_auto&quot;&gt;&#39;.sprintf($langues[&#39;FileNotExists&#39;],$c_apacheVhostConfFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors_auto = true;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+//***** Is conf/extra/httpd&ndash;vhosts.conf file clean ?<br/>
+if(in_array(&quot;dummy&quot;, $virtualHost[&#39;ServerNameValid&#39;], true) !== false &amp;&amp; $errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;if($automatique === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp = fopen($c_apacheVhostConfFile,&#39;wb&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning_auto&quot;&gt;&#39;.sprintf($langues[&#39;NotCleaned&#39;],$c_apacheVhostConfFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors_auto = true;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+//***** Does VirtualHost localhost exist ?<br/>
+if(empty($virtualHost[&#39;FirstServerName&#39;]) &amp;&amp; $errors === false) {<br/>
+&nbsp;&nbsp;&nbsp;if($automatique === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtual_localhost = &lt;&lt;&lt; EOFLOCAL<br/>
+<br/>
+#<br/>
+&lt;VirtualHost *:{$c_PortToUse}&gt;<br/>
+&nbsp;&nbsp;&nbsp;ServerName localhost<br/>
+&nbsp;&nbsp;&nbsp;DocumentRoot &quot;{$wwwDir}&quot;<br/>
+&nbsp;&nbsp;&nbsp;&lt;Directory  &quot;{$wwwDir}/&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Options +Indexes +Includes +FollowSymLinks +MultiViews<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;AllowOverride All<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Require local<br/>
+&nbsp;&nbsp;&nbsp;&lt;/Directory&gt;<br/>
+&lt;/VirtualHost&gt;<br/>
+<br/>
+EOFLOCAL;<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$fp = fopen($c_apacheVhostConfFile,&#39;wb&#39;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fwrite($fp,$virtual_localhost);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;fclose($fp);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$message[] = &#39;&lt;p class=&quot;warning_auto&quot;&gt;&#39;.sprintf($langues[&#39;NoVirtualHost&#39;],$c_apacheVhostConfFile).&#39;&lt;/p&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$errors_auto = true;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+// To scroll Alias and VirtualHost list display<br/>
+if($wampConf[&#39;ScrollListsHomePage&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;foreach($Scroll_List as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($value[&#39;scroll&#39;] &amp;&amp; ${$value[&#39;nbname&#39;]} &gt; $value[&#39;lines&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${$value[&#39;name&#39;]} = &quot; style=&#39;height:18rem;overflow&ndash;y:scroll;padding&ndash;right:5px;&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+$pageContents = &lt;&lt;&lt; EOPAGE<br/>
+&lt;!DOCTYPE html&gt;<br/>
+&lt;html lang=&quot;fr&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;head&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;title&gt;{$langues[&#39;addVirtual&#39;]}&lt;/title&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;meta charset=&quot;UTF&ndash;8&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;  &lt;meta http&ndash;equiv=&quot;X&ndash;UA&ndash;Compatible&quot; content=&quot;IE=edge,chrome=1&quot;&gt;<br/>
+  	&lt;meta name=&quot;viewport&quot; content=&quot;width=device&ndash;width&quot;&gt;<br/>
+  	&lt;link id=&quot;stylecall&quot; rel=&quot;stylesheet&quot; href=&quot;wampthemes/classic/style.css&quot; /&gt;<br/>
+  	&lt;link id=&quot;stylecall&quot; rel=&quot;stylesheet&quot; href=&quot;wampthemes/popupmodal.css&quot; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;link rel=&quot;shortcut icon&quot; href=&quot;favicon.ico&quot; type=&quot;image/ico&quot; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;style&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;#divleft {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width:69%;float:left;border&ndash;right:1px solid black;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;#divright {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width:30%;float:right;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;p {padding: 1%;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.ok, .ok_plus, .warning, .warning_auto {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text&ndash;align: center;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font&ndash;size: 1.3em;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text&ndash;shadow: 1px 1px 0 #000;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #585858;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.ok {color: limegreen;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.ok_plus {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text&ndash;align:justify;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #777777;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.warning, .warning_auto, .ok_plus {color: orange;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.warning_auto {border: 3px solid #4FEF10;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;form.lineblock {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;display:inline&ndash;block;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;label {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin&ndash;left: 10px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input.portfcgi {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width:20px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;height:20px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin:2px 0 5px 10px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input[type=&quot;text&quot;] {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width: 45%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin: 0.2% 1% 1% 1%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 0.3% 1%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border: 1px solid #999;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input.required {border:1px solid red;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input.optional {border:1px solid green;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input[type=&quot;submit&quot;] {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #ddd;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border: 1px solid #999;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin: 0.2% 1% 1% 1%;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 0.3% 1%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input[type=&quot;checkbox&quot;] {vertical&ndash;align: middle;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input[type=&quot;submit&quot;]:hover {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #FF0099;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #FFF;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;input.modify {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width:280px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;select.fcgiport {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin:1px 0 5px 45px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pre {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width: 98%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;overflow: auto;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 1%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border: #FF0099 1px solid;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #585858;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;code, code.option, code.requis {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #FFF;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text&ndash;shadow: 1px 1px 0 #000;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 0.1% 0.5%;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border&ndash;radius: 3px;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #585858;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font&ndash;size: 1.2em;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;code.option {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: green;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;code.requis {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: red;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;code.rien,code.normal {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background:#eee;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text&ndash;shadow:unset;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border&ndash;radius:0;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;code.normal {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background:#fff;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color:#000;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;span.greenpad {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color:green;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding&ndash;left:1em;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ul.nostyle {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;list&ndash;style:none;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/style&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/head&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;body&gt;<br/>
+  &lt;div id=&quot;head&quot;&gt;<br/>
+    &lt;div class=&quot;innerhead&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;    &lt;h1&gt;&lt;abbr title=&quot;Windows&quot;&gt;W&lt;/abbr&gt;&lt;abbr title=&quot;Apache&quot;&gt;a&lt;/abbr&gt;&lt;abbr title=&quot;MySQL/MariaDB&quot;&gt;m&lt;/abbr&gt;&lt;abbr title=&quot;PHP&quot;&gt;p&lt;/abbr&gt;&lt;abbr title=&quot;server WEB local&quot;&gt;server&lt;/abbr&gt;&lt;/h1&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;li&gt;Apache 2.4&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;MySQL 5 &amp;amp; 8&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;MariaDB 10&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;PHP 5, 7 &amp;amp; 8&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;/ul&gt;<br/>
+    &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&quot;utility&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &lt;li&gt;Version {$c_wampVersion} &ndash; {$c_wampMode}&lt;/li&gt;<br/>
+      &lt;li&gt;{$langueswitcher}&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;  &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;vhost&#39; style=&#39;text&ndash;align:center;&#39;&gt;&lt;li&gt;&lt;a href=&quot;add_vhost.php?lang={$langue}&quot;&gt;{$langues[&#39;addVirtual&#39;]}&lt;/a&gt; &ndash; &lt;a href=&quot;index.php?lang={$langue}&quot;&gt;{$langues[&#39;backHome&#39;]}&lt;/a&gt;&lt;/li&gt;&lt;/ul&gt;<br/>
+<br/>
+EOPAGE;<br/>
+<br/>
+if($vhost_created === true || $alias_created === true)<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= $message_ok;<br/>
+else {<br/>
+&nbsp;&nbsp;&nbsp;if($errors === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($message as $value)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 	$pageContents .= $value;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;if($sub_menu_on === true) {<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;p&gt;Apache Virtual Hosts &lt;code&gt;{$c_apacheVhostConfFile}&lt;/code&gt;&lt;/p&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;if(!empty($VhostDefine)) {<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&lt;div id=&#39;divleft&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;b&gt;&lt;u&gt;{$langues[&#39;VirtualHostExists&#39;]}&lt;/u&gt;&lt;/b&gt;&lt;/p&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;nostyle&#39; {$VhostsListScroller}&gt;{$VhostDefine}&lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;p&gt;Windows hosts &lt;code&gt;{$c_hostsFile}&lt;/code&gt;&lt;/p&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &quot;&lt;div{$styleOpaNoClick}&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &quot;&lt;form method=&#39;post&#39;&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;if($errors_auto) {<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;label&gt;{$langues[&#39;GreenErrors&#39;]}&lt;/label&gt;&lt;/p&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&lt;p style=&quot;text&ndash;align: right;&quot;&gt;&lt;input type=&quot;submit&quot; name=&quot;correct&quot; value=&quot;{$langues[&#39;Correct&#39;]}&quot; /&gt;&lt;/p&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;$_SESSION[&#39;passadd&#39;] = mt_rand(100000001,mt_getrandmax());<br/>
+&nbsp;&nbsp;&nbsp;//Check if VirtualHost to modify<br/>
+&nbsp;&nbsp;&nbsp;$styleOpaNoClickMod = ($VhostToModify === true || $AliasToModify === true) ? &quot; style=&#39;opacity:0.75;pointer&ndash;events:none;&#39;&quot; : &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$styleNoDisplay = ($VhostToModify === true || $AliasToModify === true) ? &quot; style=&#39;display:none;pointer&ndash;events:none;&#39;&quot; : &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$valueHostName = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$valueHostDir = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$valueModify = &#39;add&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$valueStart = $langues[&#39;Start&#39;];<br/>
+&nbsp;&nbsp;&nbsp;$VirtualHostName = $langues[&#39;VirtualHostName&#39;];<br/>
+&nbsp;&nbsp;&nbsp;$Required = $langues[&#39;Required&#39;];<br/>
+&nbsp;&nbsp;&nbsp;$Directory = $langues[&#39;VirtualHostFolder&#39;];<br/>
+&nbsp;&nbsp;&nbsp;$CodeClass = &quot; class=&#39;requis&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;if($VhostToModify === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueHostName = &#39; value=&quot;&#39;.$VhostToMod[&#39;name&#39;].&#39;&quot;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueHostDir = &#39; value=&quot;&#39;.$VhostToMod[&#39;directory&#39;].&#39;&quot;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueModify = &#39;modify&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VirtualHostName = &#39;ServerName&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$Required = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$Directory = &#39;Directory&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$CodeClass = &quot; class=&#39;rien&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;elseif($AliasToModify === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueStart = $langues[&#39;StartAlias&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueHostName = &#39; value=&quot;&#39;.$AliasToMod[&#39;name&#39;].&#39;&quot;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueHostDir = &#39; value=&quot;&#39;.$AliasToMod[&#39;directory&#39;].&#39;&quot;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$valueModify = &#39;modifyalias&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$VirtualHostName = &#39;Alias&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$Required = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$Directory = &#39;Directory&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$CodeClass = &quot; class=&#39;rien&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div{$styleOpaNoClickMod}&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;label&gt;{$VirtualHostName}&lt;code {$CodeClass}&gt;&lt;i&gt;{$Required}&lt;/i&gt;&lt;/code&gt;&lt;/label&gt;&lt;br&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;required&#39; type=&quot;text&quot; name=&quot;vh_name&quot; required {$valueHostName}/&gt;&lt;br&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;label&gt;{$Directory}&lt;code {$CodeClass}&gt;&lt;i&gt;{$Required}&lt;/i&gt;&lt;/code&gt;&lt;/label&gt;&lt;br&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;required&#39; type=&quot;text&quot; name=&quot;vh_folder&quot; required {$valueHostDir}/&gt;&lt;br&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$w_FcgiPhpVersionForm}\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div{$styleNoDisplay}&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$w_VirtualPortForm}\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$w_VirtualIPForm}\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;addmodify&#39; value=&#39;{$valueModify}&#39; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;modifycontent&#39; value=&#39;{$serialModify}&#39; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;checkadd&#39; value=&#39;{$_SESSION[&#39;passadd&#39;]}&#39; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&quot;submit&quot; name=&quot;submit&quot; value=&quot;{$valueStart}&quot; /&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}// End if !empty VhostDefine<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &quot;&lt;/form&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &quot;&lt;/div&gt;\n&quot;;<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&#39;divright&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &lt;div{$aliasDisplay}&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;b&gt;&lt;u&gt;Alias&lt;/u&gt;&lt;/b&gt;&lt;/p&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;nostyle&#39; {$AliasListScroller}&gt;{$aliasContents}&lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &lt;div id=&#39;vhostdelete&#39; style=&#39;margin&ndash;top:2em;&#39;&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostDelete) &amp;&amp; $wampConf[&#39;NotCheckDuplicate&#39;] == &quot;off&quot; &amp;&amp; $wampConf[&#39;NotCheckVirtualHost&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($seeVhostDelete) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_SESSION[&#39;passdel&#39;] = mt_rand(100000001,mt_getrandmax());<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;deletevhost&#39; method=&#39;post&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;nostyle&#39; {$VhostsListScroller}&gt;{$VhostDelete}&lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;checkdelete&#39; value=&#39;{$_SESSION[&#39;passdel&#39;]}&#39; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;submit&#39; name=&#39;vhostdelete&#39; value=&#39;{$langues[&#39;suppVhost&#39;]}&#39; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(!$seeVhostModify  &amp;&amp; !$seeAliasModify) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;seedelete&#39; method=&#39;post&#39; class=&#39;lineblock&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;seedelete&#39; value=&#39;afficher&#39;/&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;modify&#39; type=&#39;submit&#39; value=&#39;{$langues[&#39;suppForm&#39;]}&#39;/&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&#39;vhostmodify&#39; style=&#39;margin&ndash;top:0.5em;&#39;&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($VhostModify) &amp;&amp; $wampConf[&#39;NotCheckDuplicate&#39;] == &quot;off&quot; &amp;&amp; $wampConf[&#39;NotCheckVirtualHost&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($seeVhostModify) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_SESSION[&#39;passmodify&#39;] = mt_rand(100000001,mt_getrandmax());<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;modifyvhost&#39; method=&#39;post&#39;&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;nostyle&#39; {$VhostsListScroller}&gt;{$VhostModify}&lt;/ul&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;checkmodify&#39; value=&#39;{$_SESSION[&#39;passmodify&#39;]}&#39; /&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;submit&#39; name=&#39;vhostmodify&#39; value=&#39;{$langues[&#39;modifyVhost&#39;]}&#39; /&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(!$seeVhostDelete &amp;&amp; !$seeAliasModify) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;seemodify&#39; method=&#39;post&#39; class=&#39;lineblock&#39;&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;seemodify&#39; value=&#39;afficher&#39;/&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;modify&#39; type=&#39;submit&#39; value=&#39;{$langues[&#39;modifyForm&#39;]}&#39;/&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;} //End if sub_menu_on<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&#39;aliasmodify&#39; style=&#39;margin&ndash;top:0.5em;&#39;&gt;<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!empty($AliasModify)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($seeAliasModify) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_SESSION[&#39;aliaspassmodify&#39;] = mt_rand(100000001,mt_getrandmax());<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;modifyalias&#39; method=&#39;post&#39;&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&#39;nostyle&#39; {$AliasListScroller}&gt;{$AliasModify}&lt;/ul&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;aliascheckmodify&#39; value=&#39;{$_SESSION[&#39;aliaspassmodify&#39;]}&#39; /&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;submit&#39; name=&#39;aliasmodify&#39; value=&#39;{$langues[&#39;modifyAlias&#39;]}&#39; /&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(!$seeVhostDelete &amp;&amp; !$seeVhostModify) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;form id=&#39;seealiasmod&#39; method=&#39;post&#39; class=&#39;lineblock&#39;&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input type=&#39;hidden&#39; name=&#39;seealiasmod&#39; value=&#39;afficher&#39;/&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input class=&#39;modify&#39; type=&#39;submit&#39; value=&quot;{$langues[&#39;modAliasForm&#39;]}&quot;/&gt;\n<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;\n<br/>
+EOPAGEB;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt; &lt;!&ndash;&ndash; End div 30% right &ndash;&ndash;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div style=&#39;clear:both;&#39;&gt;&lt;/div&gt;\n<br/>
+EOPAGEB;<br/>
+}<br/>
+$pageContents .= $ModalDialogs;<br/>
+include &#39;wampthemes/copy_modal.php&#39;;<br/>
+$pageContents .= &quot;&lt;/body&gt;\n&lt;/html&gt;\n&quot;;<br/>
+<br/>
+echo $pageContents;<br/>
+<br/>
+?&gt;</body></html>

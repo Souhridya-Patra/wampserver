@@ -1,0 +1,710 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title></title>
+</head>
+<body>
+&lt;?php<br/>
+// 3.3.0 &ndash; Replace ${var} by {$var}<br/>
+<br/>
+// Page created by Shepard [Fabian Pijcke] &lt;Shepard8@laposte.net&gt;<br/>
+// Arno Esterhuizen &lt;arno.esterhuizen@gmail.com&gt;<br/>
+// and Romain Bourdon &lt;rromain@romainbourdon.com&gt;<br/>
+// and Herv&#233; Leclerc &lt;herve.leclerc@alterway.fr&gt;<br/>
+// Icons by Mark James &lt;http://www.famfamfam.com/lab/icons/silk/&gt;<br/>
+// Version 2.5 &ndash;&gt; 3.2.9 by Dominique Ottello alias Otomatic<br/>
+<br/>
+$server_dir = &quot;../&quot;;<br/>
+<br/>
+require $server_dir.&#39;scripts/config.inc.php&#39;;<br/>
+require $server_dir.&#39;scripts/wampserver.lib.php&#39;;<br/>
+<br/>
+//**** Scroll lists parameters ****<br/>
+//** Based on an idea by Panagiotis E. Papazoglou<br/>
+//General scrolling (on or off) is controlled by Wampserver parameter &#39;ScrollListsHomePage&#39;<br/>
+// via Right&ndash;Click &ndash;&gt; Wamp Settings &ndash;&gt; Allow scrolling of lists on home page<br/>
+//To allow or not the individual scrolling of the lists Projects, Alias and VirtualHost<br/>
+//   &#39;scroll&#39; true or false to do the scroll or not<br/>
+//   &#39;lines&#39;  minimum number of lines to do the scroll<br/>
+// Do not change anything other than the values assigned to &#39;scroll&#39; and &#39;lines&#39;<br/>
+$Scroll_List = array(<br/>
+&nbsp;&nbsp;&nbsp;&#39;projects&#39; =&gt; array(&#39;scroll&#39; =&gt; true,&#39;lines&#39; =&gt; 16,&#39;name&#39; =&gt; &#39;ProjectsListScroller&#39;,&#39;nbname&#39; =&gt; &#39;nbProjectsLines&#39;),<br/>
+&nbsp;&nbsp;&nbsp;&#39;alias&#39;    =&gt; array(&#39;scroll&#39; =&gt; true,&#39;lines&#39; =&gt; 16,&#39;name&#39; =&gt; &#39;AliasListScroller&#39;,   &#39;nbname&#39; =&gt; &#39;nbAliasLines&#39;),<br/>
+&nbsp;&nbsp;&nbsp;&#39;vhosts&#39;   =&gt; array(&#39;scroll&#39; =&gt; true,&#39;lines&#39; =&gt; 16,&#39;name&#39; =&gt; &#39;VhostsListScroller&#39;,  &#39;nbname&#39; =&gt; &#39;nbVirtualHostLines&#39;),<br/>
+);<br/>
+foreach($Scroll_List as $key =&gt; $value) {<br/>
+&nbsp;&nbsp;&nbsp;${$value[&#39;name&#39;]} = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;${$value[&#39;nbname&#39;]} = 0;<br/>
+}<br/>
+$nbAlias = $nbVirtualHost = $nbProjects = 0;<br/>
+<br/>
+//path to alias files<br/>
+$aliasDir = $server_dir.&#39;alias/&#39;;<br/>
+<br/>
+//Works if you have ServerSignature On and ServerTokens Full in httpd.conf<br/>
+$server_software = $_SERVER[&#39;SERVER_SOFTWARE&#39;];<br/>
+$error_content = &#39;&#39;;<br/>
+<br/>
+// we get the versions of the applications<br/>
+$phpVersion = $wampConf[&#39;phpVersion&#39;];<br/>
+$apacheVersion = $wampConf[&#39;apacheVersion&#39;];<br/>
+$doca_version = &#39;doca&#39;.substr($apacheVersion,0,3);<br/>
+$mysqlVersion = $wampConf[&#39;mysqlVersion&#39;];<br/>
+// All php versions<br/>
+$phpVersionList = listDir($c_phpVersionDir,&#39;checkPhpConf&#39;,&#39;php&#39;,true);<br/>
+$PhpAllVersions = implode(&#39; &ndash; &#39;,$phpVersionList);<br/>
+<br/>
+//We get the value of VirtualHostMenu<br/>
+$VirtualHostMenu = $wampConf[&#39;VirtualHostSubMenu&#39;];<br/>
+<br/>
+//we get the value of apachePortUsed<br/>
+$port = $wampConf[&#39;apachePortUsed&#39;];<br/>
+$UrlPort = $port !== &quot;80&quot; ? &quot;:&quot;.$port : &#39;&#39;;<br/>
+//We get the value(s) of the listening ports in Apache<br/>
+$ListenPorts = implode(&#39; &ndash; &#39;,listen_ports($c_apacheConfFile));<br/>
+//We get the value of mysqlPortUsed<br/>
+$Mysqlport = $wampConf[&#39;mysqlPortUsed&#39;];<br/>
+<br/>
+//Directories to ignore in projects<br/>
+$projectsListIgnore = array (&#39;.&#39;,&#39;..&#39;,&#39;wampthemes&#39;,&#39;wamplangues&#39;);<br/>
+<br/>
+//Search for available themes<br/>
+$styleswitcher = &#39;&lt;select id=&quot;themes&quot;&gt;&#39;.&quot;\n&quot;;<br/>
+$themes = glob(&#39;wampthemes/*&#39;, GLOB_ONLYDIR);<br/>
+foreach ($themes as $theme) {<br/>
+    if(file_exists($theme.&#39;/style.css&#39;)) {<br/>
+        $theme = str_replace(&#39;wampthemes/&#39;, &#39;&#39;, $theme);<br/>
+        $styleswitcher .= &#39;&lt;option id=&quot;&#39;.$theme.&#39;&quot;&gt;&#39;.$theme.&#39;&lt;/option&gt;&#39;.&quot;\n&quot;;<br/>
+    }<br/>
+}<br/>
+$styleswitcher .= &#39;&lt;/select&gt;&#39;.&quot;\n&quot;;<br/>
+<br/>
+//Displaying phpinfo<br/>
+if(isset($_GET[&#39;phpinfo&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;$type_info = intval(trim($_GET[&#39;phpinfo&#39;]));<br/>
+&nbsp;&nbsp;&nbsp;if($type_info &lt; &ndash;1 || $type_info &gt; 64)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$type_info = &ndash;1;<br/>
+&nbsp;&nbsp;&nbsp;phpinfo($type_info);<br/>
+&nbsp;&nbsp;&nbsp;exit();<br/>
+}<br/>
+<br/>
+//Displaying xdebug_info();<br/>
+$xdebug_info = &#39;&#39;;<br/>
+if(function_exists(&#39;xdebug_info&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;if(isset($_GET[&#39;xdebuginfo&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;xdebug_info();<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exit();<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;$xdebug_info = &#39;&lt;li&gt;&lt;a href=&quot;?xdebuginfo&quot;&gt;xdebug_info()&lt;/a&gt;&lt;/li&gt;&#39;;<br/>
+}<br/>
+<br/>
+// Language<br/>
+$langue = $wampConf[&#39;language&#39;];<br/>
+$i_langues = glob(&#39;wamplangues/index_*.php&#39;);<br/>
+$languages = array();<br/>
+foreach($i_langues as $value) {<br/>
+  $languages[] = str_replace(array(&#39;wamplangues/index_&#39;,&#39;.php&#39;), &#39;&#39;, $value);<br/>
+}<br/>
+$langueget = (!empty($_GET[&#39;lang&#39;]) ? strip_tags(trim($_GET[&#39;lang&#39;])) : &#39;&#39;);<br/>
+if(in_array($langueget,$languages))<br/>
+&nbsp;&nbsp;&nbsp;$langue = $langueget;<br/>
+<br/>
+// Search for available languages<br/>
+$langueswitcher = &#39;&lt;form method=&quot;get&quot; style=&quot;display:inline&ndash;block;&quot;&gt;&lt;select name=&quot;lang&quot; id=&quot;langues&quot; onchange=&quot;this.form.submit();&quot;&gt;&#39;.&quot;\n&quot;;<br/>
+$selected = false;<br/>
+foreach($languages as $i_langue) {<br/>
+  $langueswitcher .= &#39;&lt;option value=&quot;&#39;.$i_langue.&#39;&quot;&#39;;<br/>
+  if(!$selected &amp;&amp; $langue == $i_langue) {<br/>
+  	$langueswitcher .= &#39; selected &#39;;<br/>
+  	$selected = true;<br/>
+  }<br/>
+  $langueswitcher .= &#39;&gt;&#39;.$i_langue.&#39;&lt;/option&gt;&#39;.&quot;\n&quot;;<br/>
+}<br/>
+$langueswitcher .= &#39;&lt;/select&gt;&lt;/form&gt;&#39;;<br/>
+<br/>
+include &#39;wamplangues/index_english.php&#39;;<br/>
+if(file_exists(&#39;wamplangues/index_&#39;.$langue.&#39;.php&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;$langue_temp = $langues;<br/>
+&nbsp;&nbsp;&nbsp;include &#39;wamplangues/index_&#39;.$langue.&#39;.php&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$langues = array_merge($langue_temp, $langues);<br/>
+}<br/>
+include &#39;wamplangues/help_english.php&#39;;<br/>
+if(file_exists(&#39;wamplangues/help_&#39;.$langue.&#39;.php&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;$langue_temp = $langues;<br/>
+&nbsp;&nbsp;&nbsp;include &#39;wamplangues/help_&#39;.$langue.&#39;.php&#39;;<br/>
+&nbsp;&nbsp;&nbsp;$langues = array_merge($langue_temp, $langues);<br/>
+}<br/>
+<br/>
+$PhpAllVersionsNotFcgi = &#39;&#39;;<br/>
+if(!isset($c_ApacheDefine[&#39;PHPROOT&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;$PhpAllVersionsNotFcgi = &lt;&lt;&lt; EOF<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;dt&gt;&amp;nbsp;&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;dd&gt;&lt;small style=&#39;color:red;&#39;&gt;[FCGI]&amp;nbsp;{$langues[&#39;fcgi_not_loaded&#39;]}&lt;/small&gt;&lt;/dd&gt;<br/>
+EOF;<br/>
+}<br/>
+<br/>
+// MySQL retrieval if supported<br/>
+$nbDBMS = 0;<br/>
+$MySQLdb = &#39;&#39;;<br/>
+if(isset($wampConf[&#39;SupportMySQL&#39;]) &amp;&amp; $wampConf[&#39;SupportMySQL&#39;] ==&#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;$nbDBMS++;<br/>
+&nbsp;&nbsp;&nbsp;$defaultDBMSMySQL = ($wampConf[&#39;mysqlPortUsed&#39;] == &#39;3306&#39;) ? &quot;&amp;nbsp;&ndash;&amp;nbsp;&quot;.$langues[&#39;defaultDBMS&#39;] : &quot;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$MySQLdb = &lt;&lt;&lt; EOF<br/>
+&lt;dt&gt;{$langues[&#39;versm&#39;]}&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;dd&gt;{$mysqlVersion}&amp;nbsp;&ndash;&amp;nbsp;{$langues[&#39;mysqlportUsed&#39;]}{$Mysqlport}{$defaultDBMSMySQL}&amp;nbsp;&ndash;&amp;nbsp; &lt;a href=&#39;http://{$langues[&#39;docm&#39;]}&#39;&gt;{$langues[&#39;documentation&ndash;of&#39;]} MySQL&lt;/a&gt;&lt;/dd&gt;<br/>
+EOF;<br/>
+}<br/>
+<br/>
+// MariaDB retrieval if supported<br/>
+$MariaDB = &#39;&#39;;<br/>
+if(isset($wampConf[&#39;SupportMariaDB&#39;]) &amp;&amp; $wampConf[&#39;SupportMariaDB&#39;] ==&#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;$nbDBMS++;<br/>
+&nbsp;&nbsp;&nbsp;$defaultDBMSMaria = ($wampConf[&#39;mariaPortUsed&#39;] == &#39;3306&#39;) ? &quot;&amp;nbsp;&ndash;&amp;nbsp;&quot;.$langues[&#39;defaultDBMS&#39;] : &quot;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$MariaDB = &lt;&lt;&lt; EOF<br/>
+&lt;dt&gt;{$langues[&#39;versmaria&#39;]}&lt;/dt&gt;<br/>
+  &lt;dd&gt;{$c_mariadbVersion}&amp;nbsp;&ndash;&amp;nbsp;{$langues[&#39;mariaportUsed&#39;]}{$wampConf[&#39;mariaPortUsed&#39;]}{$defaultDBMSMaria}&amp;nbsp;&ndash;&amp;nbsp; &lt;a href=&#39;http://{$langues[&#39;docmaria&#39;]}&#39;&gt;{$langues[&#39;documentation&ndash;of&#39;]} MariaDB&lt;/a&gt;&lt;/dd&gt;<br/>
+EOF;<br/>
+}<br/>
+<br/>
+//**** Modal Dialogs *****<br/>
+//Get PHP loaded extensions<br/>
+$message[&#39;phpLoadedExtensions&#39;] = color(&#39;clean&#39;,GetPhpLoadedExtensions($c_phpVersion,6));<br/>
+//Dialog modal PHP extensions<br/>
+$divPhpExt = &lt;&lt;&lt; EOF<br/>
+&lt;div id=&quot;phpextloaded&quot; class=&quot;modalOto&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div class=&#39;modalOtoBar&#39;&gt;&lt;input type=&#39;button&#39; value=&#39;Copy&#39; class=&#39;js&ndash;copy&#39; data&ndash;target=&#39;#tocopy&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;a href=&quot;#closeOto&quot; title=&quot;Close&quot; class=&quot;closeOto&quot;&gt;X&lt;/a&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&quot;tocopy&quot;&gt;{$message[&#39;phpLoadedExtensions&#39;]}&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&lt;/div&gt;<br/>
+EOF;<br/>
+$popupPHPExtLink = &quot;&lt;a href=&#39;#phpextloaded&#39;&gt;&lt;small style=&#39;color:#777;&#39;&gt;&quot;.$langues[&#39;phpExtensions&#39;].&quot;&lt;/small&gt;&lt;/a&gt;&quot;;<br/>
+$ModalDialogs = $divPhpExt;<br/>
+//Get PHP versions usage<br/>
+$message[&#39;phpVersionsUsage&#39;] = GetPhpVersionsUsage();<br/>
+//Dialog modal PHP versions usage<br/>
+$divPhpUse = &lt;&lt;&lt; EOF<br/>
+&lt;div id=&quot;phpversionsuse&quot; class=&quot;modalOto&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div class=&#39;modalOtoBar&#39;&gt;&lt;input type=&#39;button&#39; value=&#39;Copy&#39; class=&#39;js&ndash;copya&#39; data&ndash;target=&#39;#tocopya&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;a href=&quot;#closeOto&quot; title=&quot;Close&quot; class=&quot;closeOto&quot;&gt;X&lt;/a&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&quot;tocopya&quot;&gt;{$message[&#39;phpVersionsUsage&#39;]}&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&lt;/div&gt;<br/>
+EOF;<br/>
+$popupPHPExtLink .= &quot;&amp;nbsp;&ndash;&amp;nbsp;&lt;a href=&#39;#phpversionsuse&#39;&gt;&lt;small style=&#39;color:#777;&#39;&gt;&quot;.$langues[&#39;phpVersionsUse&#39;].&quot;&lt;/small&gt;&lt;/a&gt;&quot;;<br/>
+$ModalDialogs .= $divPhpUse;<br/>
+//PHP FCGI help<br/>
+$message = str_replace(&#39;  &#39;,&#39;&amp;nbsp;&amp;nbsp;&#39;,$langues[&#39;fcgi_mode_help&#39;]);<br/>
+$message = nl2br($message);<br/>
+$divHelpFCGI = &lt;&lt;&lt; EOF<br/>
+&lt;div id=&quot;helpfcgi&quot; class=&quot;modalOtoArial&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div class=&#39;modalOtoBar&#39;&gt;&lt;input type=&#39;button&#39; value=&#39;Copy&#39; class=&#39;js&ndash;copyb&#39; data&ndash;target=&#39;#tocopyb&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;a href=&quot;#closeOto&quot; title=&quot;Close&quot; class=&quot;closeOto&quot;&gt;X&lt;/a&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div id=&quot;tocopyb&quot;&gt;{$message}&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&lt;/div&gt;<br/>
+EOF;<br/>
+$ModalDialogs .= $divHelpFCGI;<br/>
+$PhpAllVersions .= &quot;&amp;nbsp;&ndash;&amp;nbsp;&lt;a href=&#39;#helpfcgi&#39;&gt;&lt;small style=&#39;color:#777;&#39;&gt;&quot;.$langues[&#39;fcgi_mode_link&#39;].&quot;&lt;/small&gt;&lt;/a&gt;&quot;;<br/>
+//Dialog modal MySQL &ndash; MariaDB<br/>
+$popupMySQLMariaDBLink = &#39;&#39;;<br/>
+if($nbDBMS &gt; 1) {<br/>
+&nbsp;&nbsp;&nbsp;$divMySQLMariaDB = &lt;&lt;&lt; EOF<br/>
+&lt;div id=&quot;mysqlmariadb&quot; class=&quot;modalOto&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;div class=&#39;modalOtoBar&#39;&gt;&lt;input type=&#39;button&#39; value=&#39;&#39; class=&#39;js&ndash;copyc&#39; data&ndash;target=&#39;none&#39;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;a href=&quot;#closeOto&quot; title=&quot;Close&quot; class=&quot;closeOto&quot;&gt;X&lt;/a&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$langues[&#39;HelpMySQLMariaDB&#39;]}<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+&lt;/div&gt;<br/>
+EOF;<br/>
+&nbsp;&nbsp;&nbsp;$popupMySQLMariaDBLink = &quot;&amp;nbsp;&ndash;&amp;nbsp;&lt;a href=&#39;#mysqlmariadb&#39;&gt;&lt;small style=&#39;color:#777;&#39;&gt;MySQL &ndash; MariaDB&lt;/small&gt;&lt;/a&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$ModalDialogs .= $divMySQLMariaDB;<br/>
+}<br/>
+//**** End of Modal Dialogs *****<br/>
+<br/>
+//Default DBMS in first position<br/>
+if(empty($defaultDBMSMySQL))<br/>
+&nbsp;&nbsp;&nbsp;$DBMSTypes = $MariaDB.str_replace(&#39;&lt;/dd&gt;&#39;,$popupMySQLMariaDBLink.&#39;&lt;/dd&gt;&#39;,$MySQLdb);<br/>
+else<br/>
+&nbsp;&nbsp;&nbsp;$DBMSTypes = $MySQLdb.str_replace(&#39;&lt;/dd&gt;&#39;,$popupMySQLMariaDBLink.&#39;&lt;/dd&gt;&#39;,$MariaDB);<br/>
+<br/>
+// No Database Mysql System<br/>
+$noDBMS = (empty($MySQLdb) &amp;&amp; empty($MariaDB)) ? true : false;<br/>
+<br/>
+//Alias<br/>
+$aliasContents = &#39;&#39;;<br/>
+// alias retrieval<br/>
+// Get PhpMyAdmin versions and parameters<br/>
+GetAliasVersions();<br/>
+// Create alias menu<br/>
+if(is_dir($aliasDir)) {<br/>
+&nbsp;&nbsp;&nbsp;$PMyAdNotSeen = true;<br/>
+&nbsp;&nbsp;&nbsp;$handle=opendir($aliasDir);<br/>
+&nbsp;&nbsp;&nbsp;while (false !== ($file = readdir($handle))) {<br/>
+&nbsp;&nbsp;&nbsp;  if(is_file($aliasDir.$file) &amp;&amp; strstr($file, &#39;.conf&#39;)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$href = $file = str_replace(&#39;.conf&#39;,&#39;&#39;,$file);<br/>
+&nbsp;&nbsp;&nbsp;  	if(stripos($file,&#39;phpmyadmin&#39;) !== false) {<br/>
+&nbsp;&nbsp;&nbsp;  		if(!$PMyAdNotSeen || $noDBMS) continue;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$PMyAdNotSeen = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($Alias_Contents[&#39;PMyAdVer&#39;] as $key =&gt; $none) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value = $Alias_Contents[&#39;PMyAd&#39;][$key];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$href = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file = &#39;PhpMyAdmin &#39;.$Alias_Contents[$value][&#39;version&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup =&#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$value][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[$value][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$Alias_Contents[$value][&#39;fcgidPHP&#39;].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$aliasContents .= &#39;&lt;li&gt;&lt;a href=&quot;&#39;.$href.&#39;/&quot;&gt;&#39;.$file.&#39;&lt;/a&gt;&#39;.$file_sup.&#39;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAlias++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$value][&#39;compat&#39;] !== true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$aliasContents .= &#39;&lt;li class=&quot;phpmynot&quot;&gt;&#39;.$Alias_Contents[$value][&#39;notcompat&#39;].&#39;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(stripos($file,&#39;adminer&#39;) !== false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($noDBMS) continue;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[&#39;adminer&#39;][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[&#39;adminer&#39;][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$Alias_Contents[&#39;adminer&#39;][&#39;fcgidPHP&#39;].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+   			$aliasContents .= &#39;&lt;li&gt;&lt;a href=&quot;&#39;.$href.&#39;/&quot;&gt;&#39;.$file.&#39; &#39;.$Alias_Contents[&#39;adminer&#39;][&#39;version&#39;].&#39;&lt;/a&gt;&#39;.$file_sup.&#39;&lt;/li&gt;&#39;;<br/>
+   			$nbAlias++;<br/>
+   			$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Do not show phpsysinfo in alias column<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif(stripos($file,&#39;phpsysinfo&#39;) === false){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($Alias_Contents[$file][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[$file][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$Alias_Contents[$file][&#39;fcgidPHP&#39;].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+ 	    	$aliasContents .= &#39;&lt;li&gt;&lt;a href=&quot;&#39;.$href.&#39;/&quot;&gt;&#39;.$file.&#39;&lt;/a&gt;&#39;.$file_sup.&#39;&lt;/li&gt;&#39;;<br/>
+ 	    	$nbAlias++;<br/>
+ 	    	$nbAliasLines++;<br/>
+&nbsp;&nbsp;&nbsp;  	}<br/>
+&nbsp;&nbsp;&nbsp;  }<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;closedir($handle);<br/>
+}<br/>
+if(empty($aliasContents))<br/>
+&nbsp;&nbsp;&nbsp;$aliasContents = &quot;&lt;li class=&#39;phpmynot&#39;&gt;&quot;.$langues[&#39;txtNoAlias&#39;].&quot;&lt;/li&gt;\n&quot;;<br/>
+<br/>
+// Get PhpSysInfo version and parameters<br/>
+$phpsysinfo = &#39;&#39;;<br/>
+if($Alias_Contents[&#39;phpsysinfo&#39;][&#39;OK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;$file_sup = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;if($Alias_Contents[&#39;phpsysinfo&#39;][&#39;fcgid&#39;] &amp;&amp; $Alias_Contents[&#39;phpsysinfo&#39;][&#39;fcgidPHPOK&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$file_sup .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$Alias_Contents[&#39;phpsysinfo&#39;][&#39;fcgidPHP&#39;].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;$phpsysinfo = &#39;&lt;li&gt;&lt;a href=&quot;phpsysinfo&quot;&gt;PhpSysInfo &#39;.$Alias_Contents[&#39;phpsysinfo&#39;][&#39;version&#39;].&#39;&lt;/a&gt;&#39;.$file_sup.&#39;&lt;/li&gt;&#39;;<br/>
+}<br/>
+<br/>
+//Retrieving ServerName from httpd&ndash;vhosts.conf<br/>
+$addVhost = &quot;&lt;li&gt;&lt;a href=&#39;add_vhost.php?lang=&quot;.$langue.&quot;&#39;&gt;&quot;.$langues[&#39;txtAddVhost&#39;].&quot;&lt;/a&gt;&lt;/li&gt;&quot;;<br/>
+if($VirtualHostMenu == &quot;on&quot;) {<br/>
+&nbsp;&nbsp;&nbsp;$vhostError = false;<br/>
+&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = true;<br/>
+&nbsp;&nbsp;&nbsp;$error_message = array();<br/>
+  $allToolsClass = &quot;four&ndash;columns&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$virtualHost = check_virtualhost();<br/>
+&nbsp;&nbsp;&nbsp;$nbVirtualHost = $nbVirtualHostLines = $virtualHost[&#39;nb_Server&#39;];<br/>
+&nbsp;&nbsp;&nbsp;$vhostsContents = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;include_vhosts&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents = &quot;&lt;li&gt;&lt;i style=&#39;color:red;&#39;&gt;Error Include Apache&lt;/i&gt;&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoIncVhost&#39;],$wampConf[&#39;apacheVersion&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;vhosts_exist&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents = &quot;&lt;li&gt;&lt;i style=&#39;color:red;&#39;&gt;No vhosts file&lt;/i&gt;&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoVhostFile&#39;],$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;nb_Server&#39;] &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$port_number = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb_Server = $virtualHost[&#39;nb_Server&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb_Virtual = $virtualHost[&#39;nb_Virtual&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb_Document = $virtualHost[&#39;nb_Document&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb_Directory = $virtualHost[&#39;nb_Directory&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nb_End_Directory = $virtualHost[&#39;nb_End_Directory&#39;];<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;ServerName&#39;] as $key =&gt; $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameValid&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&#39;.$value.&#39; &ndash; &lt;i style=&quot;color:red;&quot;&gt;syntax error&lt;/i&gt;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtServerName&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($virtualHost[&#39;ServerNameValid&#39;][$value] === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$UrlPortVH = ($virtualHost[&#39;ServerNamePort&#39;][$value] != &#39;80&#39;) ? &#39;:&#39;.$virtualHost[&#39;ServerNamePort&#39;][$value] : &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!$virtualHost[&#39;port_listen&#39;] &amp;&amp; $virtualHost[&#39;ServerNamePortListen&#39;][$value] !== true || $virtualHost[&#39;ServerNamePortApacheVar&#39;][$value] !== true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_url = ((strpos($value, &#39;:&#39;) !== false) ? strstr($value,&#39;:&#39;,true) : $value);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&#39;.$value_url.$UrlPortVH.&#39; &ndash; &lt;i style=&quot;color:red;&quot;&gt;Not a Listen port&lt;/i&gt;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNamePortListen&#39;][$value] !== true)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$msg_error = &#39; not an Apache Listen port&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($virtualHost[&#39;ServerNamePortApacheVar&#39;][$value] !== true)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$msg_error = &#39; not an Apache define variable&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!$vhostError) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = &quot;Port &quot;.$UrlPortVH.&quot; used for the VirtualHost is &quot;.$msg_error;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($virtualHost[&#39;DocRootNotwww&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&#39;.$value.&#39; &ndash; &lt;i style=&quot;color:red;&quot;&gt;DocumentRoot error&lt;/i&gt;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtDocRoot&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;,&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$wwwDir.&quot;&lt;/span&gt;&quot;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($virtualHost[&#39;ServerNameDev&#39;][$value] === true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&#39;.$value.&#39; &ndash; &lt;i style=&quot;color:red;&quot;&gt;TLD error&lt;/i&gt;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtTLDdev&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;,&quot;&lt;span style=&#39;color:black;&#39;&gt;.dev&lt;/span&gt;&quot;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;elseif($virtualHost[&#39;ServerNameIntoHosts&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&#39;.$value.&#39; &ndash; &lt;i style=&quot;color:red;&quot;&gt;hosts file error&lt;/i&gt;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoHosts&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff = $vh_ip = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_url = ((strpos($value, &#39;:&#39;) !== false) ? strstr($value,&#39;:&#39;,true) : $value);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_link = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameIp&#39;][$value] !== false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vh_ip = $virtualHost[&#39;ServerNameIp&#39;][$value];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_url = $value_link = $vh_ip;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &#39; &lt;i&gt;(&#39;.$value.&#39;)&lt;/i&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameIpValid&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .=  &#39; &lt;i style=&quot;color:red;&quot;&gt;IP not valid&lt;/i&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtServerNameIp&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$vh_ip.&quot;&lt;/span&gt;&quot;,&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameIDNA&#39;][$value] === true){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;IDNA&ndash;&gt; &quot;.$virtualHost[&#39;ServerNameUTF8&#39;][$value].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVirtualHostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(isset($c_ApacheDefine[&#39;PHPROOT&#39;]) &amp;&amp; $virtualHost[&#39;ServerNameFcgid&#39;][$value] === true){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&quot;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVirtualHostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;ServerNameFcgid&#39;][$value] === true &amp;&amp; $virtualHost[&#39;ServerNameFcgidPHPOK&#39;][$value] !== true) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;FCGI &ndash;&gt; PHP &quot;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&quot; &ndash; &lt;span style=&#39;color:red;&#39;&gt;&quot;.$langues[&#39;phpNotExists&#39;].&quot;&lt;/span&gt;&lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = &#39;&lt;b&gt;Error&lt;/b&gt; &ndash;&ndash;&ndash; VirtualHost &#39;.$value.&#39; &ndash; Fast CGI PHP &#39;.$virtualHost[&#39;ServerNameFcgidPHP&#39;][$value].&#39; &ndash; &#39;.$langues[&#39;phpNotExists&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(in_array($value,$virtualHost[&#39;ServerNameHttps&#39;])) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$value_aff .= &quot;&lt;p style=&#39;margin:&ndash;11px 0 &ndash;2px 25px;color:green;&#39;&gt;&lt;small&gt;HTTPS &lt;/small&gt;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbVirtualHostLines++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &#39;&lt;li&gt;&lt;a href=&quot;http://&#39;.$value_url.$UrlPortVH.&#39;&quot;&gt;&#39;.$value_link.&#39;&lt;/a&gt;&#39;.$value_aff.&#39;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;else {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtVhostNotClean&#39;],$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check number of &lt;Directory equals &lt;/Directory<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($nb_End_Directory != $nb_Directory) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNbNotEqual&#39;],&quot;&amp;lt;Directory ....&amp;gt;&quot;,&quot;&amp;lt;/Directory&amp;gt;&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check number of DocumentRoot equals to number of ServerName<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($nb_Document != $nb_Server) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNbNotEqual&#39;],&quot;DocumentRoot&quot;,&quot;ServerName&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check validity of DocumentRoot<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;document&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;documentPath&#39;] as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;documentPathValid&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$documentPathError = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoPath&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;, &quot;DocumentRoot&quot;, $virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;break;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check validity of Directory Path<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;directory&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;directoryPath&#39;] as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;directoryPathValid&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$documentPathError = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoPath&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;, &quot;&amp;lt;Directory ...&quot;, $virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;break;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check Directory Path ended with a slash &#39;/&#39;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;directorySlash&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;directoryPath&#39;] as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;directoryPathSlashEnded&#39;][$value] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$documentPathError = $value;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtPathNoSlash&#39;],&quot;&lt;span style=&#39;color:black;&#39;&gt;&quot;.$value.&quot;&lt;/span&gt;&quot;, &quot;&amp;lt;Directory ...&quot;, $virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;break;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check number of &lt;VirtualHost equals or &gt; to number of ServerName<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($nb_Server != $nb_Virtual &amp;&amp; $wampConf[&#39;NotCheckDuplicate&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$port_number = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNbNotEqual&#39;],&quot;&amp;lt;VirtualHost&quot;,&quot;ServerName&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check number of port definition of &lt;VirtualHost *:xx&gt; equals to number of ServerName<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;nb_Virtual_Port&#39;] != $nb_Virtual &amp;&amp; $wampConf[&#39;NotCheckDuplicate&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$port_number = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNbNotEqual&#39;],&quot;port definition of &amp;lt;VirtualHost *:xx&amp;gt;&quot;,&quot;ServerName&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check validity of port number<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($port_number &amp;&amp; $virtualHost[&#39;port_number&#39;] === false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$port_number = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtPortNumber&#39;],&quot;&amp;lt;VirtualHost *:port&amp;gt;&quot;,$virtualHost[&#39;vhosts_file&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check if duplicate ServerName<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;nb_duplicate&#39;] &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$DuplicateNames = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;duplicate&#39;] as $NameValue)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$DuplicateNames .= &quot; &quot;.$NameValue;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = &quot;Duplicate ServerName &lt;span style=&#39;color:blue;&#39;&gt;&quot;.$DuplicateNames.&quot;&lt;/span&gt; into &quot;.$virtualHost[&#39;vhosts_file&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//Check if duplicate Server IP<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($virtualHost[&#39;nb_duplicateIp&#39;] &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$DuplicateNames = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($virtualHost[&#39;duplicateIp&#39;] as $NameValue)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$DuplicateNames .= &quot; &quot;.$NameValue;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostErrorCorrected = false;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = &quot;Duplicate IP &lt;span style=&#39;color:blue;&#39;&gt;&quot;.$DuplicateNames.&quot;&lt;/span&gt; into &quot;.$virtualHost[&#39;vhosts_file&#39;];<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;if(empty($vhostsContents)) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents = &quot;&lt;li&gt;&lt;i style=&#39;color:red:&#39;&gt;No VirtualHost&lt;/i&gt;&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNoVhost&#39;],$wampConf[&#39;apacheVersion&#39;]);<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;if(!$c_hostsFile_writable){<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostError = true;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_message[] = sprintf($langues[&#39;txtNotWritable&#39;],$c_hostsFile).&quot;&lt;br&gt;&quot;.nl2br($WarningMsg);<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;if($vhostError) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$vhostsContents .= &quot;&lt;li&gt;&lt;i style=&#39;color:red;&#39;&gt;Error(s)&lt;/i&gt; See below&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;p style=&#39;color:red;&#39;&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach($error_message as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= $value.&quot;&lt;br /&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;/p&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($vhostErrorCorrected)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$addVhost = &quot;&lt;li&gt;&lt;a href=&#39;add_vhost.php?lang=&quot;.$langue.&quot;&#39;&gt;&quot;.$langues[&#39;txtAddVhost&#39;].&quot;&lt;/a&gt; &lt;span style=&#39;font&ndash;size:0.72em;color:red;&#39;&gt;&quot;.$langues[&#39;txtCorrected&#39;].&quot;&lt;/span&gt;&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+else {<br/>
+    $allToolsClass = &quot;three&ndash;columns&quot;;<br/>
+}<br/>
+//End retrieving ServerName from httpd&ndash;vhosts.conf<br/>
+<br/>
+// Project recovery<br/>
+$list_projects = array();<br/>
+$handle=opendir(&quot;.&quot;);<br/>
+while (false !== ($file = readdir($handle))) {<br/>
+&nbsp;&nbsp;&nbsp;if(is_dir($file) &amp;&amp; !in_array($file,$projectsListIgnore))<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$list_projects[] = $file;<br/>
+}<br/>
+closedir($handle);<br/>
+$projectContents = &#39;&#39;;<br/>
+if(count($list_projects) &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;if($wampConf[&#39;LinksOnProjectsHomePage&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$projectContents .= &quot;&lt;li class=&#39;projectsdir&#39;&gt;http://localhost/project/&lt;/li&gt;\n&quot;;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;foreach($list_projects as $file) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$projectContents .= ($wampConf[&#39;LinksOnProjectsHomePage&#39;] == &#39;on&#39;) ? &quot;&lt;li&gt;&lt;a href=&#39;http://localhost/&quot;.$file.&quot;/&#39;&gt;&quot;.$file.&quot;&lt;/a&gt;&lt;/li&gt;&quot; : &#39;&lt;li&gt;&#39;.$file.&#39;&lt;/li&gt;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbProjects++;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$nbProjectsLines++;<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;if($wampConf[&#39;LinksOnProjectsHomeByIp&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$projectContents = str_replace(&#39;localhost&#39;,$c_local_ip,$projectContents);<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+if(empty($projectContents))<br/>
+&nbsp;&nbsp;&nbsp;$projectContents = &quot;&lt;li class=&#39;projectsdir&#39;&gt;&quot;.$langues[&#39;txtNoProjet&#39;].&quot;&lt;/li&gt;\n&quot;;<br/>
+else {<br/>
+&nbsp;&nbsp;&nbsp;if($wampConf[&#39;LinksOnProjectsHomePage&#39;] == &#39;off&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$projectContents .= &quot;&lt;li class=&#39;projectsdir&#39;&gt;&quot;.sprintf($langues[&#39;txtProjects&#39;].&#39;.&lt;br&gt;&#39;.$langues[&#39;txtProjectsLink&#39;],$wwwDir).&quot;&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(strpos($projectContents,&quot;http://localhost/&quot;) !== false) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$projectContents .= &quot;&lt;li&gt;&lt;i style=&#39;color:blue;&#39;&gt;Warning:&lt;/i&gt; See below&lt;/li&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if(!isset($error_content))<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content = &#39;&#39;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;p style=&#39;color:blue;&#39;&gt;&quot;.sprintf($langues[&#39;nolocalhost&#39;],$wampConf[&#39;apacheVersion&#39;]).&quot;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+// To scroll Projects, Alias and VirtualHost list display<br/>
+if($wampConf[&#39;ScrollListsHomePage&#39;] == &#39;on&#39;) {<br/>
+&nbsp;&nbsp;&nbsp;foreach($Scroll_List as $value) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if($value[&#39;scroll&#39;] &amp;&amp; ${$value[&#39;nbname&#39;]} &gt; $value[&#39;lines&#39;]) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${$value[&#39;name&#39;]} = &quot; style=&#39;height:21rem;overflow&ndash;y:scroll;padding&ndash;right:5px;&#39;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+//Miscellaneous checks &ndash; Which php.ini is loaded?<br/>
+$phpini = strtolower(trim(str_replace(&quot;\\&quot;,&quot;/&quot;,php_ini_loaded_file())));<br/>
+$c_phpConfFileOri = strtolower($c_phpVersionDir.&#39;/php&#39;.$wampConf[&#39;phpVersion&#39;].&#39;/&#39;.$phpConfFileForApache);<br/>
+$c_phpCliConf = strtolower($c_phpVersionDir.&#39;/php&#39;.$wampConf[&#39;phpVersion&#39;].&#39;/&#39;.$wampConf[&#39;phpConfFile&#39;]);<br/>
+if($phpini != strtolower($c_phpConfFile) &amp;&amp; $phpini != $c_phpConfFileOri) {<br/>
+&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;p style=&#39;color:red;&#39;&gt;*** ERROR *** The PHP configuration loaded file is: &quot;.$phpini.&quot; &ndash; should be: &quot;.$c_phpConfFile.&quot; or &quot;.$c_phpConfFileOri;<br/>
+&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;br&gt;You must perform: &lt;span style=&#39;color:green;&#39;&gt;Right&ndash;click icon Wampmanager &ndash;&gt; Refresh&lt;/span&gt;&lt;br&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;if($phpini == $c_phpCliConf || $phpini == $c_phpCliConfFile)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot; &ndash; This file is only for PHP in Command Line.&quot;;<br/>
+&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;/p&gt;&quot;;<br/>
+}<br/>
+if($filelist = php_ini_scanned_files()) {<br/>
+&nbsp;&nbsp;&nbsp;if(strlen($filelist) &gt; 0) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;p style=&#39;color:red;&#39;&gt;*** ERROR *** There are too many php.ini files&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$files = explode(&#39;,&#39;, $filelist);<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;foreach ($files as $file) {<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$error_content .= &quot;&lt;p style=&#39;color:red;&#39;&gt;*** ERROR *** There are other php.ini files: &quot;.trim(str_replace(&quot;\\&quot;,&quot;/&quot;,$file)).&quot;&lt;/p&gt;&quot;;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+&nbsp;&nbsp;&nbsp;}<br/>
+}<br/>
+<br/>
+$pageContents = &lt;&lt;&lt; EOPAGE<br/>
+&lt;!DOCTYPE html&gt;<br/>
+&lt;html&gt;<br/>
+&lt;head&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;title&gt;{$langues[&#39;titreHtml&#39;]}&lt;/title&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;meta charset=&quot;UTF&ndash;8&quot;&gt;<br/>
+  &lt;meta http&ndash;equiv=&quot;X&ndash;UA&ndash;Compatible&quot; content=&quot;IE=edge,chrome=1&quot;&gt;<br/>
+  &lt;meta name=&quot;viewport&quot; content=&quot;width=device&ndash;width&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;link id=&quot;stylecall&quot; rel=&quot;stylesheet&quot; href=&quot;wampthemes/classic/style.css&quot; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;link id=&quot;stylecall&quot; rel=&quot;stylesheet&quot; href=&quot;wampthemes/popupmodal.css&quot; /&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;link rel=&quot;shortcut icon&quot; href=&quot;favicon.ico&quot; type=&quot;image/ico&quot; /&gt;<br/>
+&lt;/head&gt;<br/>
+<br/>
+&lt;body&gt;<br/>
+  &lt;div id=&quot;head&quot;&gt;<br/>
+    &lt;div class=&quot;innerhead&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;    &lt;h1&gt;&lt;abbr title=&quot;Windows&quot;&gt;W&lt;/abbr&gt;&lt;abbr title=&quot;Apache&quot;&gt;a&lt;/abbr&gt;&lt;abbr title=&quot;MySQL/MariaDB&quot;&gt;m&lt;/abbr&gt;&lt;abbr title=&quot;PHP&quot;&gt;p&lt;/abbr&gt;&lt;abbr title=&quot;server WEB local&quot;&gt;server&lt;/abbr&gt;&lt;/h1&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;li&gt;Apache 2.4&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;MySQL 5 &amp;amp; 8&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;MariaDB 10&lt;/li&gt;&lt;li&gt;&ndash;&lt;/li&gt;&lt;li&gt;PHP 5, 7 &amp;amp; 8&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   &lt;/ul&gt;<br/>
+     &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ul class=&quot;utility&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  &lt;li&gt;Version {$c_wampVersion} &ndash; {$c_wampMode}&lt;/li&gt;<br/>
+      &lt;li&gt;{$langueswitcher}{$styleswitcher}&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;  &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/div&gt;<br/>
+<br/>
+&nbsp;&nbsp;&nbsp;&lt;div class=&quot;config&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;    &lt;div class=&quot;innerconfig&quot;&gt;<br/>
+        &lt;h2&gt;{$langues[&#39;titreConf&#39;]}&lt;/h2&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;dl class=&quot;content&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        &lt;dt&gt;{$langues[&#39;versa&#39;]}&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            &lt;dd&gt;{$apacheVersion}&amp;nbsp;&amp;nbsp;&ndash;&amp;nbsp;&lt;a href=&#39;http://{$langues[$doca_version]}&#39;&gt;{$langues[&#39;documentation&ndash;of&#39;]} Apache&lt;/a&gt;&lt;/dd&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        &lt;dt&gt;{$langues[&#39;server&#39;]}&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            &lt;dd&gt;{$server_software}&amp;nbsp;&ndash;&amp;nbsp;{$langues[&#39;portUsed&#39;]}{$ListenPorts}&lt;/dd&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        &lt;dt&gt;{$langues[&#39;versp&#39;]}&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            &lt;dd&gt;&lt;small style=&#39;color:blue;&#39;&gt;[Apache module]&amp;nbsp;&lt;/small&gt;&amp;nbsp;{$phpVersion}&amp;nbsp;&ndash;&amp;nbsp;&lt;a href=&#39;http://{$langues[&#39;docp&#39;]}&#39;&gt;{$langues[&#39;documentation&ndash;of&#39;]} PHP&lt;/a&gt;&amp;nbsp;&ndash;&amp;nbsp;{$popupPHPExtLink}&lt;/dd&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        {$PhpAllVersionsNotFcgi}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        &lt;dt&gt;&amp;nbsp;&lt;/dt&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        		&lt;dd&gt;&lt;small style=&#39;color:green;&#39;&gt;[FCGI]&lt;/small&gt;&amp;nbsp;{$PhpAllVersions}&lt;/dd&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{$DBMSTypes}<br/>
+&nbsp;&nbsp;&nbsp;        &lt;/dl&gt;<br/>
+      &lt;/div&gt;<br/>
+  &lt;/div&gt;<br/>
+   &lt;div class=&quot;divider1&quot;&gt;&amp;nbsp;&lt;/div&gt;<br/>
+   &lt;div class=&quot;alltools {$allToolsClass}&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;    &lt;div class=&quot;inneralltools&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;div class=&quot;column&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;h2&gt;{$langues[&#39;titrePage&#39;]}&lt;/h2&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;ul class=&quot;tools&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            &lt;li&gt;&lt;a href=&quot;?phpinfo=&ndash;1&quot;&gt;phpinfo()&lt;/a&gt;&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            {$xdebug_info}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            {$phpsysinfo}<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            {$addVhost}<br/>
+&nbsp;&nbsp;&nbsp;            &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;        		&lt;div class=&quot;column&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;h2&gt;{$langues[&#39;txtProjet&#39;]}&amp;nbsp;&lt;span style=&#39;font&ndash;size:60%;&#39;&gt;({$nbProjects})&lt;/span&gt;&lt;/h2&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;ul class=&quot;projects&quot;{$ProjectsListScroller}&gt;<br/>
+&nbsp;&nbsp;&nbsp;                {$projectContents}<br/>
+&nbsp;&nbsp;&nbsp;            &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;        	&lt;div class=&quot;column&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;h2&gt;{$langues[&#39;txtAlias&#39;]}&amp;nbsp;&lt;span style=&#39;font&ndash;size:60%;&#39;&gt;({$nbAlias})&lt;/span&gt;&lt;/h2&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;ul class=&quot;aliases&quot;{$AliasListScroller}&gt;<br/>
+&nbsp;&nbsp;&nbsp;                {$aliasContents}<br/>
+&nbsp;&nbsp;&nbsp;            &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;/div&gt;<br/>
+EOPAGE;<br/>
+if($VirtualHostMenu == &quot;on&quot;) {<br/>
+$pageContents .= &lt;&lt;&lt; EOPAGEA<br/>
+&nbsp;&nbsp;&nbsp;        &lt;div class=&quot;column&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;h2&gt;{$langues[&#39;txtVhost&#39;]}&amp;nbsp;&lt;span style=&#39;font&ndash;size:60%;&#39;&gt;({$nbVirtualHost})&lt;/span&gt;&lt;/h2&gt;<br/>
+&nbsp;&nbsp;&nbsp;            &lt;ul class=&quot;vhost&quot;{$VhostsListScroller}&gt;<br/>
+&nbsp;&nbsp;&nbsp;                {$vhostsContents}<br/>
+&nbsp;&nbsp;&nbsp;            &lt;/ul&gt;<br/>
+&nbsp;&nbsp;&nbsp;        &lt;/div&gt;<br/>
+EOPAGEA;<br/>
+}<br/>
+if(!empty($error_content)) {<br/>
+$pageContents .= &lt;&lt;&lt; EOPAGEB<br/>
+&nbsp;&nbsp;&nbsp;&lt;div id=&quot;error&quot; style=&quot;clear:both;&quot;&gt;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;{$error_content}<br/>
+EOPAGEB;<br/>
+}<br/>
+$pageContents .= &lt;&lt;&lt; EOPAGEC<br/>
+      &lt;/div&gt;<br/>
+    &lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;div class=&quot;divider2&quot;&gt;&amp;nbsp;&lt;/div&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;ul id=&quot;foot&quot;&gt;<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;li&gt;&lt;a href=&quot;{$langues[&#39;forumLink&#39;]}&quot;&gt;{$langues[&#39;forum&#39;]}&lt;/a&gt;&lt;/li&gt;<br/>
+&nbsp;&nbsp;&nbsp;&lt;/ul&gt;<br/>
+{$ModalDialogs}<br/>
+<br/>
+EOPAGEC;<br/>
+include &#39;wampthemes/select_themes.php&#39;;<br/>
+include &#39;wampthemes/copy_modal.php&#39;;<br/>
+$pageContents .= &lt;&lt;&lt; EOPAGED<br/>
+&lt;/body&gt;<br/>
+&lt;/html&gt;<br/>
+EOPAGED;<br/>
+<br/>
+echo $pageContents;<br/>
+<br/>
+?&gt;</body></html>
